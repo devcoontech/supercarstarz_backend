@@ -1,0 +1,20 @@
+# Dedicated Postgres for Supercarstars. Host port 5440 avoids clashing with other local containers.
+services:
+  db:
+    image: postgres:16
+    container_name: supercarstars-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: supercars
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-supercars_dev_pw}
+      POSTGRES_DB: supercars
+    ports:
+      - "127.0.0.1:5440:5432"
+    volumes:
+      - supercars_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supercars"]
+      interval: 5s
+      retries: 10
+volumes:
+  supercars_pgdata:
