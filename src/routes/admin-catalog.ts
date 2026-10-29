@@ -1,10 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
+import { putPublic, removePublic } from '../storage.js';
 import { pool, tx } from '../db.js';
-import { config } from '../config.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import { audit, buildInsert, buildUpdate, sniffImage } from '../util.js';
 import { lockVehicle, rangeParam } from '../bookings.js';
@@ -210,20 +208,24 @@ export async function adminCatalogRoutes(app: FastifyInstance) {
       const type = sniffImage(buf);
       if (!type) { failed.push({ filename: part.filename, reason: 'Only JPEG, PNG or WebP images are accepted' }); continue; }
       const key = `vehicles/${vid}/${crypto.randomUUID()}.${type.ext}`;
-      const full = path.join(path.resolve(config.uploadDir), key);
-      fs.mkdirSync(path.dirname(full), { recursive: true });
-      fs.writeFileSync(full, buf);
+      let url: string;
+      try {
+        url = await putPublic(key, buf, type.mime);
+      } catch {
+        failed.push({ filename: part.filename, reason: 'Could not save the image' });
+        continue;
+      }
       try {
         const row = await tx(async (c) => {
           await lockVehicle(c, vid);
           const n = (await c.query('SELECT count(*)::int n, COALESCE(max(sort_order),-1)+1 AS next FROM vehicle_images WHERE vehicle_id=$1', [vid])).rows[0];
           return (await c.query(
             `INSERT INTO vehicle_images(vehicle_id, url, storage_key, sort_order, is_cover) VALUES ($1,$2,$3,$4,$5) RETURNING id, url, is_cover AS "isCover", sort_order AS "sortOrder"`,
-            [vid, `${config.publicApiUrl}/uploads/${key}`, key, n.next, n.n === 0])).rows[0];
+            [vid, url, key, n.next, n.n === 0])).rows[0];
         });
         saved.push(row);
-      } catch (e) {
-        fs.rmSync(full, { force: true });
+      } catch {
+        await removePublic(key);
         failed.push({ filename: part.filename, reason: 'Could not save the image' });
       }
     }
@@ -265,7 +267,7 @@ export async function adminCatalogRoutes(app: FastifyInstance) {
         if (next) await c.query('UPDATE vehicle_images SET is_cover=true WHERE id=$1', [next.id]);
         else await c.query('UPDATE vehicles SET published=false WHERE id=$1', [p.id]); // cannot stay live without a cover
       }
-      if (img.storage_key) fs.rmSync(path.join(path.resolve(config.uploadDir), img.storage_key), { force: true });
+      if (img.storage_key) await removePublic(img.storage_key, img.url);
       return { ok: true };
     });
   });
@@ -280,11 +282,9 @@ export async function adminCatalogRoutes(app: FastifyInstance) {
     const type = sniffImage(buf);
     if (!type) throw badRequest('Only JPEG, PNG or WebP images are accepted', 'invalid_image');
     const key = `${kind}/${crypto.randomUUID()}.${type.ext}`;
-    const full = path.join(path.resolve(config.uploadDir), key);
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, buf);
+    const url = await putPublic(key, buf, type.mime);
     await audit(pool, req.user.sub, 'upload', key, 'create');
-    return reply.status(201).send({ url: `${config.publicApiUrl}/uploads/${key}` });
+    return reply.status(201).send({ url });
   });
 
   /* ---------- Event types ---------- */

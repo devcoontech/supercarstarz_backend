@@ -1,10 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { getPrivate, putPrivate, removePrivate } from '../storage.js';
 import { DateTime } from 'luxon';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { config } from '../config.js';
 import { hashPassword } from '../security.js';
 import { pool, tx } from '../db.js';
 import { badRequest, conflict, forbidden, HttpError, notFound } from '../errors.js';
@@ -93,7 +91,6 @@ export async function adminOpsRoutes(app: FastifyInstance) {
   /* ----- Driving licence photos (front and back) -----
    * Identity documents: stored outside the public uploads folder, sent only to the roles allowed to see licence
    * details, never cached, and every view, upload and removal is in the audit log. */
-  const licenceDir = () => path.resolve(config.privateUploadDir);
   const requireLicenceAccess = (req: any) => {
     if (!SENSITIVE_DRIVER_ROLES.includes(req.user.role)) throw forbidden('Only the owner, administrators and driver coordinators can see licence details');
   };
@@ -119,9 +116,7 @@ export async function adminOpsRoutes(app: FastifyInstance) {
     const type = sniffImage(buf);
     if (!type) throw badRequest('Only JPEG, PNG or WebP images are accepted', 'invalid_image');
     const key = `drivers/${id}/${crypto.randomUUID()}.${type.ext}`;
-    const full = path.join(licenceDir(), key);
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, buf, { mode: 0o600 });
+    await putPrivate(key, buf, type.mime);
     let old: { storage_key: string } | undefined;
     try {
       await tx(async (c) => {
@@ -131,10 +126,10 @@ export async function adminOpsRoutes(app: FastifyInstance) {
         await audit(c, req.user.sub, 'driver', id, old ? 'replace_licence_image' : 'add_licence_image', null, { side });
       });
     } catch (e) {
-      fs.rmSync(full, { force: true });
+      await removePrivate(key);
       throw e;
     }
-    if (old) fs.rmSync(path.join(licenceDir(), old.storage_key), { force: true });
+    if (old) await removePrivate(old.storage_key);
     return reply.status(201).send({ items: await licenceImages(id) });
   });
 
@@ -143,10 +138,10 @@ export async function adminOpsRoutes(app: FastifyInstance) {
     const p = z.object({ id: uuid, imageId: uuid }).parse(req.params);
     const img = (await pool.query('SELECT * FROM driver_licence_images WHERE id=$1 AND driver_id=$2', [p.imageId, p.id])).rows[0];
     if (!img) throw notFound('Image not found');
-    const full = path.join(licenceDir(), img.storage_key);
-    if (!fs.existsSync(full)) throw notFound('The image file is missing');
+    const file = await getPrivate(img.storage_key);
+    if (!file) throw notFound('The image file is missing');
     await audit(pool, req.user.sub, 'driver', p.id, 'view_licence_image', null, { side: img.side });
-    return reply.type(img.mime).header('cache-control', 'no-store, private').header('x-content-type-options', 'nosniff').send(fs.readFileSync(full));
+    return reply.type(img.mime).header('cache-control', 'no-store, private').header('x-content-type-options', 'nosniff').send(file);
   });
 
   app.delete('/drivers/:id/licence-images/:imageId', async (req) => {
@@ -154,7 +149,7 @@ export async function adminOpsRoutes(app: FastifyInstance) {
     const p = z.object({ id: uuid, imageId: uuid }).parse(req.params);
     const img = (await pool.query('DELETE FROM driver_licence_images WHERE id=$1 AND driver_id=$2 RETURNING side, storage_key', [p.imageId, p.id])).rows[0];
     if (!img) throw notFound('Image not found');
-    fs.rmSync(path.join(licenceDir(), img.storage_key), { force: true });
+    await removePrivate(img.storage_key);
     await audit(pool, req.user.sub, 'driver', p.id, 'remove_licence_image', null, { side: img.side });
     return { items: await licenceImages(p.id) };
   });
@@ -320,7 +315,7 @@ export async function adminOpsRoutes(app: FastifyInstance) {
     const r = await pool.query('DELETE FROM drivers WHERE id=$1 RETURNING full_name', [id]);
     if (!r.rowCount) throw notFound('Driver not found');
     for (const f of files) {
-      fs.rmSync(path.join(licenceDir(), f.storage_key), { force: true }); // licence photos go with the driver
+      await removePrivate(f.storage_key); // licence photos go with the driver
       await audit(pool, req.user.sub, 'driver', id, 'remove_licence_image', null, { side: f.side, via: 'driver_delete' });
     }
     await audit(pool, req.user.sub, 'driver', id, 'delete', { name: r.rows[0].full_name }, null);

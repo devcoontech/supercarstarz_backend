@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "migrate": "tsx src/migrate.ts",
     "seed": "tsx src/seed.ts",
+    "storage:migrate": "tsx src/storage-migrate.ts",
     "test": "vitest run"
   },
   "dependencies": {

@@ -40,6 +40,13 @@ export const config = {
   uploadDir: process.env.UPLOAD_DIR ?? './uploads',
   /** Sensitive files (driver licences). Never served statically; keep it outside UPLOAD_DIR and back it up. */
   privateUploadDir: process.env.PRIVATE_UPLOAD_DIR ?? './private-uploads',
+  /** Supabase Storage for uploads (see storage.ts). Unset: files stay on disk in the folders above. */
+  supabase: {
+    url: process.env.SUPABASE_URL || '',
+    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    bucket: process.env.SUPABASE_STORAGE_BUCKET || 'images',
+    privateBucket: process.env.SUPABASE_PRIVATE_BUCKET || 'private-files',
+  },
   smtpUrl: process.env.SMTP_URL || '',
   mailFrom: process.env.MAIL_FROM || 'Supercarstars <no-reply@localhost>',
   stripeSecretFallback: process.env.STRIPE_SECRET_KEY || '',
