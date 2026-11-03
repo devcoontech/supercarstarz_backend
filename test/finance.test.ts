@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import Stripe from 'stripe';
-import { pool } from '../src/db.js';
-import { setSecret } from '../src/settings.js';
+import { pool } from '../src/core/db.js';
+import { setSecret } from '../src/core/settings.js';
 import { app as makeApp, bookingPayload, day, makeCustomer, makeStaff, makeVehicle, resetDb } from './helpers.js';
 
 /*

@@ -1,8 +1,8 @@
 import { DateTime } from 'luxon';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
-import { pool } from '../src/db.js';
-import { hashPassword } from '../src/security.js';
+import { pool } from '../src/core/db.js';
+import { hashPassword } from '../src/core/security.js';
 
 export async function resetDb() {
   const { rows } = await pool.query(`SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> 'schema_migrations'`);

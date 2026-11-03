@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { pool } from '../src/db.js';
-import { clearMapsCache, setMapsHttp } from '../src/maps.js';
-import { resolveSmtp, setMailer } from '../src/mailer.js';
+import { pool } from '../src/core/db.js';
+import { clearMapsCache, setMapsHttp } from '../src/lib/maps.js';
+import { resolveSmtp, setMailer } from '../src/lib/mailer.js';
 import { app as makeApp, bookingPayload, makeCustomer, makeEvent, makeStaff, makeVehicle, resetDb } from './helpers.js';
 
 let app: FastifyInstance;

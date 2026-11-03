@@ -1,8 +1,9 @@
 import { buildApp } from './app.js';
-import { config } from './config.js';
-import { pool, tx } from './db.js';
-import { expireHolds } from './bookings.js';
-import { processOutbox } from './emails.js';
+import { config } from './core/config.js';
+import { pool, tx } from './core/db.js';
+import { expireHolds } from './modules/bookings/status.js';
+import { processOutbox } from './modules/notifications/emails.js';
+import { queueReminders } from './modules/notifications/reminders.js';
 
 const app = await buildApp();
 
@@ -16,9 +17,15 @@ const mailTimer = setInterval(() => {
   processOutbox().catch((e) => app.log.error({ err: e }, 'processOutbox failed'));
 }, 10_000);
 
+// Queues "see you tomorrow" reminders for bookings starting in the next 24 hours (each sent once).
+const reminderTimer = setInterval(() => {
+  tx((c) => queueReminders(c)).catch((e) => app.log.error({ err: e }, 'queueReminders failed'));
+}, 15 * 60_000);
+
 const shutdown = async () => {
   clearInterval(timer);
   clearInterval(mailTimer);
+  clearInterval(reminderTimer);
   await app.close();
   await pool.end();
   process.exit(0);

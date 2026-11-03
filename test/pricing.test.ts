@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculatePrice, type PricingRule, type PriceInput } from '../src/pricing.js';
+import { calculatePrice, type PricingRule, type PriceInput } from '../src/modules/pricing/pricing.js';
 
 const settings = { 'pricing.serviceFeeBp': 500, 'payment.mode': 'full', 'payment.depositPercentBp': 3000 } as const;
 const vehicle = { id: 'v1', price_per_hour_pence: 20000, delivery_available: true, delivery_fee_pence: 5000, chauffeur_available: true, chauffeur_fee_pence: 10000, deposit_pence: 0 };

@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import Stripe from 'stripe';
-import { pool } from '../src/db.js';
-import { setSecret } from '../src/settings.js';
-import { expireHolds } from '../src/bookings.js';
-import { setMailer, type Mail } from '../src/mailer.js';
-import { processOutbox } from '../src/emails.js';
+import { pool } from '../src/core/db.js';
+import { setSecret } from '../src/core/settings.js';
+import { expireHolds } from '../src/modules/bookings/status.js';
+import { setMailer, type Mail } from '../src/lib/mailer.js';
+import { processOutbox } from '../src/modules/notifications/emails.js';
 import { app as makeApp, bookingPayload, day, makeCustomer, makeEvent, makeStaff, makeVehicle, resetDb } from './helpers.js';
 
 let app: FastifyInstance;
@@ -750,5 +750,112 @@ describe('uploads', () => {
     // cannot publish without a cover
     await pool.query('DELETE FROM vehicle_images');
     expect((await post(`/api/admin/vehicles/${v.id}/publish`, staff.h, { published: true })).json().error.code).toBe('publish_requirements');
+  });
+});
+
+describe('branded emails, owner emails and reminders', () => {
+  let sent: Mail[] = [];
+  beforeEach(() => {
+    sent = [];
+    setMailer({ send: async (m) => (sent.push(m), { sent: true }) });
+  });
+  const outbox = async () => (await pool.query('SELECT kind, recipient, status, last_error FROM email_outbox ORDER BY created_at, recipient')).rows;
+
+  it('sends every customer email as branded HTML with the inline logo, plus a matching plain-text body', async () => {
+    const v = await makeVehicle();
+    const c = await makeCustomer(app, 'html@test.com');
+    await post('/api/me/bookings', c.h, bookingPayload(v.id));
+    await processOutbox();
+    const m = sent[0];
+    expect(m.html).toContain('cid:logo@supercarstars');
+    expect(m.html).toContain('#ffc41f'); // brand gold
+    expect(m.html).toContain('Lamborghini Huracan');
+    expect(m.text).toContain('Lamborghini Huracan');
+    expect(m.inline).toEqual([expect.objectContaining({ cid: 'logo@supercarstars', contentType: 'image/jpeg' })]);
+    expect(m.attachments).toBeUndefined(); // the logo is inline, not a download
+  });
+
+  it('queues no owner emails until an owner address is set', async () => {
+    const v = await makeVehicle();
+    const c = await makeCustomer(app, 'noowner@test.com');
+    await post('/api/me/bookings', c.h, bookingPayload(v.id));
+    expect((await outbox()).map((r) => r.recipient)).toEqual(['customer']);
+  });
+
+  it('emails the owner the full booking sheet on a new request and on confirmation; the customer never sees staff notes', async () => {
+    const staff = await makeStaff(app);
+    await app.inject({ method: 'PUT', url: '/api/admin/settings', headers: staff.h, payload: { settings: { 'notifications.ownerEmails': 'boss@test.com, ops@test.com' } } });
+    const v = await makeVehicle();
+    const c = await makeCustomer(app, 'sheet@test.com');
+    await pool.query(`UPDATE customers SET phone='07999 123456' WHERE id=$1`, [c.id]);
+    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id, { customerNotes: 'Birthday for Leo, turning 7' }))).json();
+    await pool.query(`UPDATE bookings SET admin_notes='VIP INTERNAL' WHERE id=$1`, [bk.id]);
+    await post(`/api/admin/bookings/${bk.id}/status`, staff.h, { to: 'confirmed', allowUnpaid: true, reason: 'paid cash' });
+    await processOutbox(50);
+    expect(await outbox()).toEqual([
+      expect.objectContaining({ kind: 'booking_received', recipient: 'customer', status: 'sent' }),
+      expect.objectContaining({ kind: 'booking_received', recipient: 'owner', status: 'sent' }),
+      expect.objectContaining({ kind: 'booking_confirmed', recipient: 'customer', status: 'sent' }),
+      expect.objectContaining({ kind: 'booking_confirmed', recipient: 'owner', status: 'sent' }),
+    ]);
+    const owner = sent.find((m) => m.subject.startsWith('Booking confirmed:'))!;
+    expect(owner.to).toBe('boss@test.com, ops@test.com');
+    expect(owner.subject).toContain(bk.ref);
+    for (const s of ['sheet@test.com', '07999 123456', 'Birthday for Leo', 'VIP INTERNAL', 'Booking total', 'Balance due']) expect(owner.text).toContain(s);
+    expect(sent.find((m) => m.subject.startsWith('New booking request'))!.text).toContain('Action needed');
+    for (const m of sent.filter((x) => x.to === 'sheet@test.com')) expect(m.text + m.html).not.toContain('VIP INTERNAL');
+  });
+
+  it('tells the customer and the owner about a cancellation request', async () => {
+    const staff = await makeStaff(app);
+    await app.inject({ method: 'PUT', url: '/api/admin/settings', headers: staff.h, payload: { settings: { 'notifications.ownerEmails': 'boss@test.com' } } });
+    const v = await makeVehicle();
+    const c = await makeCustomer(app, 'creq@test.com');
+    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json();
+    await post(`/api/admin/bookings/${bk.id}/status`, staff.h, { to: 'confirmed', allowUnpaid: true, reason: 'ok' });
+    await pool.query('DELETE FROM email_outbox');
+    expect((await post(`/api/me/bookings/${bk.id}/cancel`, c.h, {})).statusCode).toBeLessThan(300);
+    await processOutbox(50);
+    expect(sent.map((m) => [m.to, m.subject.split(' (')[0].split(':')[0]])).toEqual(expect.arrayContaining([
+      ['creq@test.com', "We've received your cancellation request"], ['boss@test.com', 'Cancellation requested'],
+    ]));
+  });
+
+  it('queues one reminder per booking the day before, never twice, and not for bookings made at the last minute', async () => {
+    const { queueReminders } = await import('../src/modules/notifications/reminders.js');
+    const staff = await makeStaff(app);
+    const v = await makeVehicle();
+    const c = await makeCustomer(app, 'remind@test.com');
+    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json();
+    await post(`/api/admin/bookings/${bk.id}/status`, staff.h, { to: 'confirmed', allowUnpaid: true, reason: 'ok' });
+    const run = async () => { const x = await pool.connect(); try { return await queueReminders(x); } finally { x.release(); } };
+    expect(await run()).toBe(0); // 10 days away
+    // Move it to tomorrow morning, booked long ago.
+    await pool.query(`UPDATE bookings SET created_at = now() - interval '10 days', start_at = now() + interval '20 hours', end_at = now() + interval '22 hours',
+                        blocked_during = tstzrange(now() + interval '20 hours', now() + interval '22 hours') WHERE id=$1`, [bk.id]);
+    expect(await run()).toBe(1);
+    expect(await run()).toBe(0);
+    await processOutbox(50);
+    const m = sent.find((s) => s.subject.startsWith('See you tomorrow'))!;
+    expect(m.to).toBe('remind@test.com');
+    expect(m.subject).toContain(bk.ref);
+  });
+
+  it('sends the paid-in-full invoice email with the final receipt attached', async () => {
+    const staff = await makeStaff(app);
+    const v = await makeVehicle();
+    const c = await makeCustomer(app, 'invoice@test.com');
+    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json();
+    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 10000, method: 'bank_transfer' });
+    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 32000, method: 'bank_transfer' });
+    await processOutbox(50);
+    const part = sent.find((m) => m.subject.startsWith('Payment verified for'))!;
+    expect(part.text).toContain('Still to pay: £320.00');
+    const full = sent.find((m) => m.subject.includes('paid in full'))!;
+    const receipt = (await pool.query(`SELECT number FROM invoices WHERE kind='full_payment_receipt'`)).rows[0];
+    expect(full.subject).toContain(receipt.number);
+    expect(full.text).toContain('Nothing further to pay');
+    expect(full.attachments).toEqual([expect.objectContaining({ filename: `${receipt.number}.html` })]);
+    expect(full.attachments![0].content).toContain('data:image/jpeg;base64,'); // the receipt carries the logo too
   });
 });

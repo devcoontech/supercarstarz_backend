@@ -7,16 +7,16 @@ import rateLimit from '@fastify/rate-limit';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ZodError } from 'zod';
-import { config } from './config.js';
-import { pool } from './db.js';
-import { HttpError, forbidden, unauthorized } from './errors.js';
-import { authRoutes } from './routes/auth.js';
-import { publicRoutes } from './routes/public.js';
-import { customerRoutes } from './routes/customer.js';
-import { adminCatalogRoutes } from './routes/admin-catalog.js';
-import { adminBookingRoutes } from './routes/admin-bookings.js';
-import { adminOpsRoutes } from './routes/admin-ops.js';
-import { webhookRoutes } from './routes/webhooks.js';
+import { config } from './core/config.js';
+import { pool } from './core/db.js';
+import { HttpError, forbidden, unauthorized } from './core/errors.js';
+import { authRoutes } from './modules/auth/auth.routes.js';
+import { publicRoutes } from './modules/public/public.routes.js';
+import { customerRoutes } from './modules/customers/me.routes.js';
+import { adminCatalogRoutes } from './modules/catalog/catalog.routes.js';
+import { adminBookingRoutes } from './modules/bookings/bookings.routes.js';
+import { adminOpsRoutes } from './modules/admin/admin.routes.js';
+import { webhookRoutes } from './modules/payments/webhooks.routes.js';
 
 export type TokenUser = { sub: string; kind: 'staff' | 'customer'; role?: string };
 

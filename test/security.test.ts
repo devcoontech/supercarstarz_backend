@@ -5,13 +5,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type Stripe from 'stripe';
-import { pool } from '../src/db.js';
-import { config, trustProxySetting } from '../src/config.js';
-import { expireHolds } from '../src/bookings.js';
-import { handleStripeEvent } from '../src/payments.js';
-import { setMailer, type Mail } from '../src/mailer.js';
-import { clearMapsCache, setMapsHttp } from '../src/maps.js';
-import { toCsv } from '../src/routes/admin-ops.js';
+import { pool } from '../src/core/db.js';
+import { config, trustProxySetting } from '../src/core/config.js';
+import { expireHolds } from '../src/modules/bookings/status.js';
+import { handleStripeEvent } from '../src/modules/payments/payments.js';
+import { setMailer, type Mail } from '../src/lib/mailer.js';
+import { clearMapsCache, setMapsHttp } from '../src/lib/maps.js';
+import { toCsv } from '../src/modules/reports/reports.routes.js';
 import { app as makeApp, bookingPayload, makeCustomer, makeStaff, makeVehicle, resetDb } from './helpers.js';
 
 /** Regression tests for the security audit findings (docs/security-audit/REPORT.md). */
