@@ -9,8 +9,9 @@ const id = z.string().uuid();
 const idParams = z.object({ id });
 
 export function pricingRuleRoutes(app: FastifyInstance) {
+  // Every price belongs to a car: a rule's car is set when it is created and never changes.
   const ruleBody = z.object({
-    vehicleId: id.nullish(), eventTypeId: id.nullish(), kind: z.enum(['hourly', 'package', 'extra_hour', 'special_date', 'per_mile']), label: z.string().max(80).nullish(),
+    vehicleId: id, eventTypeId: id.nullish(), kind: z.enum(['hourly', 'package', 'extra_hour', 'special_date', 'per_mile']), label: z.string().max(80).nullish(),
     hours: z.number().int().min(1).nullish(), amountPence: z.number().int().min(0).nullish(), minAmountPence: z.number().int().min(0).nullish(), multiplierBp: z.number().int().min(1).max(100000).nullish(),
     startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(), endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(), active: z.boolean().default(true),
   });
@@ -27,6 +28,7 @@ export function pricingRuleRoutes(app: FastifyInstance) {
 
   app.post('/pricing-rules', async (req, reply) => {
     const data = ruleBody.parse(req.body);
+    if (!(await pool.query('SELECT 1 FROM vehicles WHERE id=$1 AND deleted_at IS NULL', [data.vehicleId])).rowCount) throw notFound('Vehicle not found');
     if (data.kind === 'special_date' && data.endsOn! < data.startsOn!) throw badRequest('End date must not be before start date');
     const ins = buildInsert('pricing_rules', ruleFields, data);
     const row = await tx(async (c) => {
@@ -39,7 +41,7 @@ export function pricingRuleRoutes(app: FastifyInstance) {
 
   app.patch('/pricing-rules/:id', async (req) => {
     const { id: rid } = idParams.parse(req.params);
-    const data = ruleBody.partial().strict().parse(req.body);
+    const data = ruleBody.omit({ vehicleId: true }).partial().strict().parse(req.body);
     const u = buildUpdate('pricing_rules', rid, ruleFields, data, false);
     if (u.empty) throw badRequest('Nothing to update');
     const r = await pool.query(u.sql, u.vals).catch((e) => { if (e.code === '23514') throw badRequest('That rule is missing required fields for its type', 'invalid_rule'); throw e; });

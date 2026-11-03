@@ -8,6 +8,19 @@ import { testEmail } from '../notifications/account-emails.js';
 import { drive, mustGeocode, toMiles } from '../../lib/maps.js';
 import { audit } from '../../core/util.js';
 import { getStripe } from '../payments/payments.js';
+import { putPublic, removePublic } from '../../lib/storage.js';
+import { sniffImage } from '../../core/util.js';
+import crypto from 'node:crypto';
+
+/** The parts of the business address, in printed order. */
+const ADDRESS_PARTS = ['company.addressLine1', 'company.addressLine2', 'company.city', 'company.region', 'company.postcode', 'company.country'] as const;
+
+/** Deletes a replaced logo file. Its storage key is the part of the URL from "branding/" on. */
+async function removeLogoFile(url: string) {
+  const i = url.indexOf('branding/');
+  if (i < 0) return;
+  await removePublic(decodeURIComponent(url.slice(i)), url).catch(() => undefined); // a leftover file is harmless
+}
 
 /** Settings plus which secrets exist (never their values) and where the email connection comes from. */
 async function settingsPayload() {
@@ -48,12 +61,21 @@ export function settingsRoutes(app: FastifyInstance) {
         if (typeof v === 'number' && (!Number.isFinite(v) || v < 0)) throw badRequest(`Setting ${k} must be zero or more`);
         if (k === 'email.port' && (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 65535)) throw badRequest('Email port must be between 1 and 65535');
         if (k === 'email.fromAddress' && v && !z.string().email().safeParse(v).success) throw badRequest('From address must be a valid email address');
+        if ((k === 'company.email' || k === 'company.supportEmail') && String(v).trim() && !z.string().email().safeParse(String(v).trim()).success) throw badRequest(k === 'company.email' ? 'Business email must be a valid email address' : 'Support email must be a valid email address');
+        if (k === 'company.name' && !String(v).trim()) throw badRequest('Business name cannot be empty');
+        if (k === 'company.logoUrl') throw badRequest('Upload the logo with the logo button');
+        if (k.startsWith('company.') && String(v).length > 2000) throw badRequest(`${k} is too long`);
         if (k === 'notifications.ownerEmails' && String(v).trim() && !String(v).split(/[,;\s]+/).filter(Boolean).every((e) => z.string().email().safeParse(e).success)) throw badRequest('Owner notification emails must be email addresses separated by commas');
         if ((k === 'company.websiteUrl' || k === 'company.dashboardUrl') && String(v).trim() && !/^https?:\/\/\S+$/i.test(String(v).trim())) throw badRequest('Links must start with https://');
         if (k === 'email.host' && v && !/^[A-Za-z0-9.-]+$/.test(String(v).trim())) throw badRequest('Email server must be a host name like smtp.example.com');
         if (k === 'maps.provider' && v !== 'osm' && v !== 'google') throw badRequest('Map provider must be osm or google');
         if (k === 'maps.countryCodes' && !/^([a-zA-Z]{2})(,\s*[a-zA-Z]{2})*$/.test(String(v).trim())) throw badRequest('Countries must be two-letter codes separated by commas, e.g. gb,ie');
         await setSetting(k as SettingKey, typeof v === 'string' ? v.trim() : v, c);
+      }
+      // Receipts, statements and emails print one address line: rebuild it whenever a part changes.
+      if (ADDRESS_PARTS.some((k) => k in (body.settings ?? {}))) {
+        const s = await getSettings(c);
+        await setSetting('company.address', ADDRESS_PARTS.map((k) => String(s[k]).trim()).filter(Boolean).join(', '), c);
       }
       if (body.secrets?.emailPassword) await setSecret('email.password', body.secrets.emailPassword, c);
       if (body.secrets?.mapsGoogleKey) await setSecret('maps.googleKey', body.secrets.mapsGoogleKey, c);
@@ -62,6 +84,33 @@ export function settingsRoutes(app: FastifyInstance) {
       if (body.secrets?.stripeWebhookSecret) await setSecret('stripe.webhookSecret', body.secrets.stripeWebhookSecret, c);
       await audit(c, req.user.sub, 'settings', null, 'update', null, { keys: Object.keys(body.settings ?? {}), secretsChanged: Object.keys(body.secrets ?? {}) }); // values never logged
     });
+    return settingsPayload();
+  });
+
+  /** The business logo: JPEG, PNG or WebP (checked from the bytes), replacing any earlier one. */
+  app.post('/settings/logo', async (req) => {
+    if (req.user.role !== 'owner') throw forbidden('Only the company owner can change settings');
+    const part = await req.file();
+    if (!part) throw badRequest('No file received', 'no_file');
+    const buf = await part.toBuffer();
+    if (part.file.truncated) throw badRequest('The logo must be 8 MB or smaller', 'file_too_large');
+    const type = sniffImage(buf);
+    if (!type) throw badRequest('Only JPEG, PNG or WebP images are accepted', 'invalid_image');
+    const before = (await getSettings())['company.logoUrl'];
+    const key = `branding/logo-${crypto.randomUUID()}.${type.ext}`;
+    const url = await putPublic(key, buf, type.mime);
+    await setSetting('company.logoUrl', url);
+    if (before) await removeLogoFile(before);
+    await audit(pool, req.user.sub, 'settings', null, 'logo_uploaded');
+    return settingsPayload();
+  });
+
+  app.delete('/settings/logo', async (req) => {
+    if (req.user.role !== 'owner') throw forbidden('Only the company owner can change settings');
+    const before = (await getSettings())['company.logoUrl'];
+    await setSetting('company.logoUrl', '');
+    if (before) await removeLogoFile(before);
+    await audit(pool, req.user.sub, 'settings', null, 'logo_removed');
     return settingsPayload();
   });
 

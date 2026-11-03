@@ -46,7 +46,7 @@ async function docContext(q: Q, bookingId: string) {
   const net = o.paid_pence - o.refunded_pence;
   const multi = rows.length > 1;
   return {
-    business: { name: s['company.name'], address: s['company.address'], email: s['company.supportEmail'], phone: s['company.supportPhone'], vatNumber: s['company.vatNumber'] },
+    business: { name: s['company.name'], address: s['company.address'], email: s['company.supportEmail'], phone: s['company.supportPhone'], vatNumber: s['company.vatNumber'], logoUrl: s['company.logoUrl'] || null },
     timezone: s['booking.timezone'],
     customer: { name: o.customer_name, email: o.customer_email, phone: o.customer_phone },
     order: { id: o.id, ref: o.ref, vehicles: counted.length, status: orderStatus(rows) },
@@ -169,7 +169,9 @@ type Shown = Omit<Ctx, 'customerId'>;
 
 function header(ctx: Pick<Shown, 'business' | 'timezone'>, title: string, number: string | null, issuedAt: string | Date) {
   const biz = ctx.business;
-  const logo = logoDataUri();
+  // The uploaded business logo when there is one (documents issued earlier keep the logo they were issued with).
+  const uploaded = (biz as { logoUrl?: string | null }).logoUrl;
+  const logo = uploaded && /^https?:\/\//i.test(uploaded) ? esc(uploaded) : logoDataUri();
   return `${logo ? `<div class="brandbar"><img src="${logo}" alt="${esc(biz.name)}" width="150"></div>` : ''}<header><div><h1>${esc(title)}</h1>${number ? `<div><b>No. ${esc(number)}</b></div>` : ''}<div class="muted small">Issued ${esc(fmt(issuedAt, ctx.timezone))}</div></div>
     <div style="text-align:right"><b>${esc(biz.name)}</b>${biz.address ? `<div class="small">${esc(biz.address)}</div>` : ''}
     ${biz.email ? `<div class="small">${esc(biz.email)}</div>` : ''}${biz.phone ? `<div class="small">${esc(biz.phone)}</div>` : ''}${biz.vatNumber ? `<div class="small">VAT ${esc(biz.vatNumber)}</div>` : ''}</div></header>`;

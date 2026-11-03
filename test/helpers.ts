@@ -9,6 +9,10 @@ export async function resetDb() {
   await pool.query(`TRUNCATE ${rows.map((r) => '"' + r.tablename + '"').join(',')} RESTART IDENTITY CASCADE`);
 }
 
+/** Turns on the optional approval step (off by default), for tests of the approve-then-pay flow. */
+export const requireApproval = () =>
+  pool.query(`INSERT INTO settings(key,value) VALUES ('booking.requireApproval','true') ON CONFLICT (key) DO UPDATE SET value='true'`);
+
 export const app = async (): Promise<FastifyInstance> => buildApp();
 
 /** yyyy-mm-dd in London, `n` days from now (default far enough to clear lead time). */

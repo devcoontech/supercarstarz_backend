@@ -15,12 +15,12 @@ const SENSITIVE_DRIVER_ROLES = ['owner', 'administrator', 'driver_coordinator'];
 export function driversRoutes(app: FastifyInstance) {
   const driverBody = z.object({
     internalRef: z.string().max(40).nullish(), fullName: z.string().trim().min(1).max(120), phone: z.string().trim().min(5).max(40), email: z.string().email().nullish(),
-    licenseNumber: z.string().max(60).nullish(), licenseExpiry: date.nullish(), employment: z.enum(['employee', 'contractor']),
+    licenseNumber: z.string().max(60).nullish(), licenseType: z.string().trim().max(40).nullish(), licenseExpiry: date.nullish(), address: z.string().trim().max(300).nullish(), employment: z.enum(['employee', 'contractor']),
     workingHours: z.object({ start: z.string().regex(/^\d{2}:\d{2}$/), end: z.string().regex(/^\d{2}:\d{2}$/) }).nullish(), notes: z.string().max(2000).nullish(), active: z.boolean(),
   });
-  const driverFields = { internalRef: 'internal_ref', fullName: 'full_name', phone: 'phone', email: 'email', licenseNumber: 'license_number', licenseExpiry: 'license_expiry', employment: 'employment', workingHours: 'working_hours', notes: 'notes', active: 'active' };
+  const driverFields = { internalRef: 'internal_ref', fullName: 'full_name', phone: 'phone', email: 'email', licenseNumber: 'license_number', licenseType: 'license_type', licenseExpiry: 'license_expiry', address: 'address', employment: 'employment', workingHours: 'working_hours', notes: 'notes', active: 'active' };
   const driverOut = (d: any, role: string) => {
-    const { license_number, ...rest } = d;
+    const { license_number, license_type, ...rest } = d;
     return SENSITIVE_DRIVER_ROLES.includes(role) ? d : rest;
   };
 
@@ -45,7 +45,7 @@ export function driversRoutes(app: FastifyInstance) {
   app.patch('/drivers/:id', async (req) => {
     const { id } = z.object({ id: uuid }).parse(req.params);
     const data = driverBody.partial().strict().parse(req.body);
-    if (('licenseNumber' in data || 'licenseExpiry' in data) && !SENSITIVE_DRIVER_ROLES.includes(req.user.role!)) throw badRequest('Not allowed to change licence details');
+    if (('licenseNumber' in data || 'licenseType' in data || 'licenseExpiry' in data) && !SENSITIVE_DRIVER_ROLES.includes(req.user.role!)) throw badRequest('Not allowed to change licence details');
     const u = buildUpdate('drivers', id, driverFields, { ...data, workingHours: data.workingHours === undefined ? undefined : data.workingHours && JSON.stringify(data.workingHours) }, false);
     if (u.empty) throw badRequest('Nothing to update');
     if (data.active === false) {

@@ -10,7 +10,8 @@ export const EMAIL_KINDS = new Set([
   'booking_received', 'booking_awaiting_payment', 'booking_confirmed', 'payment_received', 'payment_failed', 'booking_cancelled', 'booking_rejected',
   'booking_cancellation_requested', 'booking_completed', 'booking_reminder', 'refund', 'charge_confirmed', 'charge_removed',
   // Changes to a booking: emailed with the notification's own title and text.
-  'rescheduled', 'vehicle_changed', 'vehicle_added', 'booking_extended', 'extension_rejected', 'driver_assigned',
+  'rescheduled', 'vehicle_changed', 'vehicle_added', 'booking_extended', 'extension_rejected',
+  // Not 'driver_assigned': the customer sees that in the app only, with no email.
 ]);
 
 /**

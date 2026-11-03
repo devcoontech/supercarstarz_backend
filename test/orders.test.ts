@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import Stripe from 'stripe';
 import { pool } from '../src/core/db.js';
 import { setSecret } from '../src/core/settings.js';
-import { app as makeApp, bookingPayload, day, makeCustomer, makeStaff, makeVehicle, resetDb } from './helpers.js';
+import { app as makeApp, requireApproval, bookingPayload, day, makeCustomer, makeStaff, makeVehicle, resetDb } from './helpers.js';
 
 /*
  * Acceptance scenarios for tax settings, multi-vehicle orders, offers and booking extensions.
@@ -222,6 +222,7 @@ describe('offers', () => {
   });
 
   it('removing a vehicle recalculates the offer and tax; the other vehicles carry on', async () => {
+    await requireApproval();
     await setting('tax.enabled', true);
     await setting('tax.rateBp', 1000);
     await offer({ title: '2+ save 5%', value: 5, min: 2 });

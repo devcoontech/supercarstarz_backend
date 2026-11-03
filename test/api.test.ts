@@ -6,7 +6,7 @@ import { setSecret } from '../src/core/settings.js';
 import { expireHolds } from '../src/modules/bookings/status.js';
 import { setMailer, type Mail } from '../src/lib/mailer.js';
 import { processOutbox } from '../src/modules/notifications/emails.js';
-import { app as makeApp, bookingPayload, day, makeCustomer, makeEvent, makeStaff, makeVehicle, resetDb } from './helpers.js';
+import { app as makeApp, requireApproval, bookingPayload, day, makeCustomer, makeEvent, makeStaff, makeVehicle, resetDb } from './helpers.js';
 
 let app: FastifyInstance;
 beforeAll(async () => { app = await makeApp(); });
@@ -24,7 +24,7 @@ describe('customer app support endpoints', () => {
     expect(r.statusCode).toBe(200);
     expect(r.json().stripe.publishableKey).toBe('pk_test_abc123');
     expect(r.json().company.supportPhone).toBe('020 0000 0000');
-    expect(r.json().booking).toMatchObject({ openHour: 10, closeHour: 19, requireApproval: true });
+    expect(r.json().booking).toMatchObject({ openHour: 10, closeHour: 19, requireApproval: false });
     expect(r.body).not.toContain('SHOULDNEVERLEAK');
     expect(r.body).not.toContain('sk_test');
   });
@@ -77,6 +77,7 @@ describe('booking emails', () => {
   };
 
   it('emails once when a booking is received, and not again on a second run', async () => {
+    await requireApproval();
     const v = await makeVehicle();
     const c = await makeCustomer(app, 'mail@test.com');
     const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json();
@@ -116,6 +117,7 @@ describe('booking emails', () => {
   });
 
   it('emails when a booking is approved for payment, with the exact amount due, and again only for a genuine new approval', async () => {
+    await requireApproval();
     const v = await makeVehicle();
     const c = await makeCustomer(app, 'approve@test.com');
     const staff = await makeStaff(app);
@@ -191,21 +193,21 @@ describe('booking emails', () => {
     expect((await outbox())[0].status).toBe('skipped');
   });
 
-  it('sends exactly once when two workers run at the same time, and emails booking changes', async () => {
+  it('sends exactly once when two workers run at the same time, and does not email a driver assignment', async () => {
     const v = await makeVehicle();
     const c = await makeCustomer(app, 'race@test.com');
     const staff = await makeStaff(app);
     const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id, { chauffeur: true }))).json();
     await post(`/api/admin/bookings/${bk.id}/status`, staff.h, { to: 'confirmed', allowUnpaid: true });
     const d = (await post('/api/admin/drivers', staff.h, { fullName: 'Dan', phone: '07000000001' })).json();
-    await post(`/api/admin/bookings/${bk.id}/driver`, staff.h, { driverId: d.id }); // a booking change: emailed
+    await post(`/api/admin/bookings/${bk.id}/driver`, staff.h, { driverId: d.id }); // shown in the app, not emailed
     await Promise.all([processOutbox(), processOutbox(), processOutbox()]);
-    expect((await outbox()).map((r) => r.kind).sort()).toEqual(['booking_confirmed', 'booking_received', 'driver_assigned']);
-    expect(sent).toHaveLength(3);
-    expect(sent.find((m) => m.subject.startsWith('Driver assigned'))!.text).toContain('Your booking now:');
+    expect((await outbox()).map((r) => r.kind).sort()).toEqual(['booking_confirmed', 'booking_received']);
+    expect(sent).toHaveLength(2);
+    expect(sent.some((m) => m.subject.startsWith('Driver assigned'))).toBe(false);
     expect((await pool.query(`SELECT count(*)::int n FROM notifications WHERE kind='driver_assigned'`)).rows[0].n).toBe(1);
     const detail = (await app.inject({ method: 'GET', url: `/api/admin/bookings/${bk.id}`, headers: staff.h })).json();
-    expect(detail.emails.map((e: any) => e.status)).toEqual(['sent', 'sent', 'sent']);
+    expect(detail.emails.map((e: any) => e.status)).toEqual(['sent', 'sent']);
   });
 });
 
@@ -324,6 +326,7 @@ describe('access control', () => {
   });
 
   it('does not offer a way for a client to mark a payment as succeeded', async () => {
+    await requireApproval();
     const v = await makeVehicle();
     const c = await makeCustomer(app);
     const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json();
@@ -334,7 +337,17 @@ describe('access control', () => {
 });
 
 describe('booking creation and availability', () => {
-  it('creates a priced booking with a snapshot and starts pending', async () => {
+  it('by default sends a customer booking straight to payment, with no approval step', async () => {
+    const v = await makeVehicle();
+    const c = await makeCustomer(app);
+    const r = await post('/api/me/bookings', c.h, bookingPayload(v.id));
+    expect(r.statusCode).toBe(201);
+    expect(r.json()).toMatchObject({ status: 'awaiting_payment' });
+    expect(r.json().holdExpiresAt).toBeTruthy();
+  });
+
+  it('creates a priced booking with a snapshot and starts pending when approval is on', async () => {
+    await requireApproval();
     const v = await makeVehicle();
     const c = await makeCustomer(app);
     const r = await post('/api/me/bookings', c.h, bookingPayload(v.id));
@@ -489,6 +502,7 @@ describe('events and offers', () => {
 
 describe('lifecycle and audit', () => {
   it('enforces allowed transitions, requires reasons, and logs who did what', async () => {
+    await requireApproval();
     const v = await makeVehicle();
     const c = await makeCustomer(app);
     const staff = await makeStaff(app);
@@ -678,6 +692,7 @@ describe('payments', () => {
   });
 
   it('records manual payments, tracks partial/full/refunded states and blocks overpayment', async () => {
+    await requireApproval();
     const v = await makeVehicle();
     const c = await makeCustomer(app);
     const staff = await makeStaff(app);
@@ -783,6 +798,7 @@ describe('branded emails, owner emails and reminders', () => {
   });
 
   it('emails the owner the full booking sheet on a new request and on confirmation; the customer never sees staff notes', async () => {
+    await requireApproval();
     const staff = await makeStaff(app);
     await app.inject({ method: 'PUT', url: '/api/admin/settings', headers: staff.h, payload: { settings: { 'notifications.ownerEmails': 'boss@test.com, ops@test.com' } } });
     const v = await makeVehicle();

@@ -9,7 +9,7 @@ export const DEFAULT_SETTINGS = {
   'booking.closeHour': 19,
   'booking.timezone': 'Europe/London',
   'booking.minLeadHours': 24,
-  'booking.requireApproval': true, // new bookings start 'pending' until staff confirm
+  'booking.requireApproval': false, // off: customer bookings go straight to payment and confirm when paid; on: they start 'pending' until staff approve
   'booking.holdMinutes': 30, // how long an unpaid 'awaiting_payment' booking holds the car
   'booking.pendingHoldHours': 48, // how long an unpaid customer request waiting for approval holds the car (0 = until staff act)
   'booking.maxOpenUnpaidOrders': 3, // unpaid customer orders one customer can have open at once (0 = no limit)
@@ -41,7 +41,19 @@ export const DEFAULT_SETTINGS = {
   'company.name': 'Supercarstars',
   'company.supportEmail': '',
   'company.supportPhone': '',
-  'company.address': '', // printed on receipts and invoices
+  'company.address': '', // printed on receipts and invoices; built from the address parts below when they are saved
+  'company.addressLine1': '',
+  'company.addressLine2': '',
+  'company.city': '',
+  'company.region': '', // county, state or province
+  'company.postcode': '',
+  'company.country': 'United Kingdom',
+  'company.logoUrl': '', // uploaded in Settings > Business details; printed on receipts and statements
+  'company.description': '',
+  'company.type': '', // e.g. Limited company, Sole trader
+  'company.registrationNumber': '', // company registration number, if any
+  'company.email': '', // general business email (customer emails use the support email)
+  'company.altPhone': '',
   'company.vatNumber': '',
   'company.websiteUrl': 'https://supercarstars.com', // linked from the buttons and footer of customer emails
   'company.dashboardUrl': '', // admin dashboard address, linked from owner emails ("Open in dashboard")

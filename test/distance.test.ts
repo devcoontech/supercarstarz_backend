@@ -142,7 +142,7 @@ describe('chauffeur and pick-up/drop-off events', () => {
     const v = await makeVehicle({ chauffeur_charge_type: 'hourly', chauffeur_fee_pence: 3000 });
     const ev = (await post('/api/admin/event-types', staff.h, { title: 'Pick and Drop', published: true, pricingBasis: 'distance' })).json();
     await put(`/api/admin/vehicles/${v.id}/event-types`, staff.h, { eventTypeIds: [ev.id] });
-    const rule = await post('/api/admin/pricing-rules', staff.h, { kind: 'per_mile', eventTypeId: ev.id, amountPence: 250, minAmountPence: 4000 });
+    const rule = await post('/api/admin/pricing-rules', staff.h, { kind: 'per_mile', vehicleId: v.id, eventTypeId: ev.id, amountPence: 250, minAmountPence: 4000 });
     expect(rule.statusCode).toBe(201);
     return { staff, v, ev, payload: { eventTypeId: ev.id, pickupAddress: 'Pickup Road, London', dropoffAddress: 'Drop Road, Brighton' } };
   }
@@ -224,7 +224,7 @@ describe('deleting records', () => {
     expect((await del(`/api/admin/drivers/${spare.id}`, staff.h)).statusCode).toBe(200);
 
     const ev2 = await makeEvent(v.id, 'Roadshows');
-    await post('/api/admin/pricing-rules', staff.h, { kind: 'hourly', eventTypeId: ev2.id, amountPence: 1000 });
+    await post('/api/admin/pricing-rules', staff.h, { kind: 'hourly', vehicleId: v.id, eventTypeId: ev2.id, amountPence: 1000 });
     expect((await del(`/api/admin/event-types/${ev2.id}`, staff.h)).statusCode).toBe(200); // its rules and links go with it
     expect((await pool.query('SELECT count(*)::int n FROM pricing_rules WHERE event_type_id=$1', [ev2.id])).rows[0].n).toBe(0);
   });
@@ -318,7 +318,7 @@ describe('map picker support', () => {
     const v = await makeVehicle({ chauffeur_available: true });
     const ev = (await post('/api/admin/event-types', staff.h, { title: 'Pick and Drop', published: true, pricingBasis: 'distance' })).json();
     await put(`/api/admin/vehicles/${v.id}/event-types`, staff.h, { eventTypeIds: [ev.id] });
-    await post('/api/admin/pricing-rules', staff.h, { kind: 'per_mile', eventTypeId: ev.id, amountPence: 200 });
+    await post('/api/admin/pricing-rules', staff.h, { kind: 'per_mile', vehicleId: v.id, eventTypeId: ev.id, amountPence: 200 });
     const q = await post('/api/public/quote', {}, bookingPayload(v.id, {
       eventTypeId: ev.id, pickupAddress: 'Pin A', dropoffAddress: 'Pin B', pickupPoint: { lat: 51.52, lng: -0.1 }, dropoffPoint: { lat: 50.82, lng: -0.14 },
     }));

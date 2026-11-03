@@ -38,12 +38,14 @@ async function main() {
        ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug RETURNING id`, [slug, title, description, i + 1, basis]);
     eventIds[slug] = r.rows[0].id;
   }
-  // Pick and drop is priced per mile: £4.02/mile with a £30 minimum (edit under Pricing).
-  if (!(await pool.query(`SELECT 1 FROM pricing_rules WHERE kind='per_mile' AND event_type_id=$1`, [eventIds['pick-and-drop']])).rowCount) {
-    await pool.query(`INSERT INTO pricing_rules(kind, event_type_id, amount_pence, min_amount_pence, label) VALUES ('per_mile',$1,402,3000,'Pick and drop')`, [eventIds['pick-and-drop']]);
-  }
+  // Pick and drop is priced per mile on each car: £4.02/mile with a £30 minimum (edit on the car's Pricing tab).
+  const pickDropRate = async (vehicleId: string) => {
+    if ((await pool.query(`SELECT 1 FROM pricing_rules WHERE kind='per_mile' AND vehicle_id=$1 AND event_type_id=$2`, [vehicleId, eventIds['pick-and-drop']])).rowCount) return;
+    await pool.query(`INSERT INTO pricing_rules(kind, vehicle_id, event_type_id, amount_pence, min_amount_pence, label) VALUES ('per_mile',$1,$2,402,3000,'Pick and drop')`, [vehicleId, eventIds['pick-and-drop']]);
+  };
   for (const v of (await pool.query('SELECT id FROM vehicles WHERE deleted_at IS NULL')).rows) {
     for (const id of Object.values(eventIds)) await pool.query('INSERT INTO vehicle_event_types(vehicle_id, event_type_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [v.id, id]);
+    await pickDropRate(v.id);
   }
   if ((await pool.query('SELECT 1 FROM vehicles LIMIT 1')).rowCount) { console.log('vehicles exist, event types ensured, skipping the rest of the demo data'); return; }
 
@@ -66,6 +68,7 @@ async function main() {
       [make, model, year, category, colour, city, power, top, rate, delivery, fee, `${make} ${model} (demo listing)`, ...(CITY[city] ?? CITY.London)])).rows[0].id;
     await pool.query('INSERT INTO vehicle_images(vehicle_id, url, sort_order, is_cover) VALUES ($1,$2,0,true)', [v, img(photo)]);
     for (const id of Object.values(eventIds)) await pool.query('INSERT INTO vehicle_event_types(vehicle_id, event_type_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [v, id]);
+    await pickDropRate(v);
   }
   await pool.query(`INSERT INTO addons(name, detail, price_pence, sort_order) VALUES
     ('Professional photographer','40+ edited images within 48 hours',9500,1),('Printed photo album','A4 hardback, 20 pages',4500,2),('Birthday styling','Name banner, ribbon and balloon arch',3500,3)`);

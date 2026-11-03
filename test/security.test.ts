@@ -12,7 +12,7 @@ import { handleStripeEvent } from '../src/modules/payments/payments.js';
 import { setMailer, type Mail } from '../src/lib/mailer.js';
 import { clearMapsCache, setMapsHttp } from '../src/lib/maps.js';
 import { toCsv } from '../src/modules/reports/reports.routes.js';
-import { app as makeApp, bookingPayload, makeCustomer, makeStaff, makeVehicle, resetDb } from './helpers.js';
+import { app as makeApp, requireApproval, bookingPayload, makeCustomer, makeStaff, makeVehicle, resetDb } from './helpers.js';
 
 /** Regression tests for the security audit findings (docs/security-audit/REPORT.md). */
 
@@ -109,7 +109,7 @@ describe('map lookups for quotes and bookings', () => {
     const v = await makeVehicle({ chauffeur_available: true, base_lat: 51.5074, base_lng: -0.1278, delivery_pricing: 'per_mile', delivery_radius_miles: 80 });
     const ev = (await post('/api/admin/event-types', staff.h, { title: 'Pick and Drop', published: true, pricingBasis: 'distance' })).json();
     await app.inject({ method: 'PUT', url: `/api/admin/vehicles/${v.id}/event-types`, headers: staff.h, payload: { eventTypeIds: [ev.id] } });
-    await post('/api/admin/pricing-rules', staff.h, { kind: 'per_mile', eventTypeId: ev.id, amountPence: 250, minAmountPence: 3000 });
+    await post('/api/admin/pricing-rules', staff.h, { kind: 'per_mile', vehicleId: v.id, eventTypeId: ev.id, amountPence: 250, minAmountPence: 3000 });
     return { v, ev };
   }
 
@@ -139,6 +139,7 @@ describe('map lookups for quotes and bookings', () => {
 
 describe('unpaid customer requests', () => {
   it('expire if staff do not approve them in time, and one customer cannot hold many at once', async () => {
+    await requireApproval();
     const cars = [await makeVehicle(), await makeVehicle(), await makeVehicle(), await makeVehicle()];
     const c = await makeCustomer(app);
     const orders = [];
