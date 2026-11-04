@@ -19,4 +19,6 @@ COPY assets ./assets
 RUN mkdir -p uploads private-uploads && chown node:node uploads private-uploads
 USER node
 EXPOSE 4000
-CMD ["node", "dist/server.js"]
+# Migrations run first, so a failed migration stops this version from starting. Coolify's pre-deployment command is
+# skipped on the first deploy, and a failed post-deployment command still counts as success. exec passes on SIGTERM.
+CMD ["sh", "-c", "node dist/scripts/migrate.js && exec node dist/server.js"]

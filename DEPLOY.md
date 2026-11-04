@@ -1,8 +1,55 @@
 # Deploying Supercarstars
 
-`docker-compose.prod.yml` runs the database, API, dashboard and Caddy (automatic HTTPS) on one server. The customer app is built separately with EAS (see the end of this guide).
+There are two ways to run this on a server. **Use one, not both**, because each needs ports 80 and 443.
+
+- **Coolify (the current setup):** manage and redeploy from a web UI. See the next section. Don't use `docker-compose.prod.yml` or `deploy/` with it.
+- **Plain Docker Compose:** `docker-compose.prod.yml` runs the database, API, dashboard and Caddy (automatic HTTPS). Follow steps 1 to 7 below.
+
+The customer app is built separately with EAS (see the end of this guide).
 
 Run the server commands as root on the VPS.
+
+## Deploying with Coolify
+
+Coolify deploys one repo per application, so it runs three separate resources: the database, the API and the dashboard. It also provides the proxy and HTTPS.
+
+| Resource | Source | Port | Domain |
+| --- | --- | --- | --- |
+| PostgreSQL 17 | Coolify database | 5432 (private) | None |
+| API | `backend` repo, Dockerfile build pack | 4000 | `https://api.supercarstars.com` |
+| Dashboard | `dashboard` repo, Dockerfile build pack | 80 | `https://admin.supercarstars.com` |
+
+Set "Ports Exposes" only. Don't add port mappings, or the service becomes reachable without going through the proxy.
+
+**API environment variables (runtime):**
+
+```ini
+NODE_ENV=production
+PORT=4000
+DATABASE_URL=<internal URL from the database's General page>
+DATABASE_SSL=false
+JWT_SECRET=<openssl rand -hex 32>
+SETTINGS_ENCRYPTION_KEY=<from your local backend/.env if moving data, otherwise openssl rand -hex 32>
+CORS_ORIGINS=https://admin.supercarstars.com
+TRUST_PROXY=1
+PUBLIC_API_URL=https://api.supercarstars.com
+UPLOAD_DIR=/app/uploads
+PRIVATE_UPLOAD_DIR=/app/private-uploads
+```
+
+**API persistent storage:** add a volume mount for `/app/uploads` and one for `/app/private-uploads`. Without them, every deploy loses the uploaded files.
+
+**API health check:** path `/health`, port 4000.
+
+**Dashboard environment variable (available during build):** `VITE_API_URL=https://api.supercarstars.com`
+
+**Migrations** run automatically each time the API container starts.
+
+**Backups:** Coolify's database backups are stored on this server under `/data/coolify/backups` unless you add S3 storage. Schedule the database backup and back up both upload volumes too, then keep a copy off the server.
+
+**Firewall:** use the Hostinger panel, because UFW may not block ports that Docker publishes. Allow 22, 80 and 443, plus 8000, 6001 and 6002 until the Coolify UI has its own domain, then close those three.
+
+Don't run `backup.sh` on this setup, because it only works with the Compose stack.
 
 ## 1. Point the domain at the server
 
