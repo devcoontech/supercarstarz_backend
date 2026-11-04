@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+node_modules
+dist
+uploads
+uploads-test
+private-uploads
+private-uploads-test
+email-previews
+test
+deploy
+*.log

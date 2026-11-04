@@ -1,0 +1,101 @@
+# Production stack: database, API, dashboard and Caddy (HTTPS). See DEPLOY.md.
+# Expects the dashboard repo beside this one (../dashboard). Only Caddy publishes ports.
+name: supercars
+
+x-api-environment: &api-environment
+  NODE_ENV: production
+  PORT: 4000
+  DATABASE_URL: postgres://supercars:${DB_PASSWORD:?Set DB_PASSWORD}@db:5432/supercars
+  # The database is on the private Docker network and has no TLS.
+  DATABASE_SSL: "false"
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+  SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?Set SETTINGS_ENCRYPTION_KEY}
+  CORS_ORIGINS: https://${ADMIN_DOMAIN:?Set ADMIN_DOMAIN}
+  # One proxy (Caddy) sits in front of the API, and the API port is not published.
+  TRUST_PROXY: "1"
+  PUBLIC_API_URL: https://${API_DOMAIN:?Set API_DOMAIN}
+  UPLOAD_DIR: /app/uploads
+  PRIVATE_UPLOAD_DIR: /app/private-uploads
+  SMTP_URL: ${SMTP_URL:-}
+  MAIL_FROM: ${MAIL_FROM:-}
+  SEED_OWNER_EMAIL: ${SEED_OWNER_EMAIL:-}
+  SEED_OWNER_PASSWORD: ${SEED_OWNER_PASSWORD:-}
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: supercars
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      POSTGRES_DB: supercars
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supercars -d supercars"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Applies new database migrations on every deploy, then exits.
+  migrate:
+    build: .
+    image: supercars-api
+    command: ["node", "dist/scripts/migrate.js"]
+    restart: "no"
+    environment: *api-environment
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    image: supercars-api
+    restart: unless-stopped
+    environment: *api-environment
+    volumes:
+      - uploads:/app/uploads
+      - private_uploads:/app/private-uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  dashboard:
+    build:
+      context: ../dashboard
+      args:
+        VITE_API_URL: https://${API_DOMAIN:?Set API_DOMAIN}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - dashboard
+
+volumes:
+  pgdata:
+  uploads:
+  private_uploads:
+  caddy_data:
+  caddy_config:
