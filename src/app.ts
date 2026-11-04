@@ -4,6 +4,7 @@ import jwt from '@fastify/jwt';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import rateLimit from '@fastify/rate-limit';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ZodError } from 'zod';
@@ -17,6 +18,7 @@ import { adminCatalogRoutes } from './modules/catalog/catalog.routes.js';
 import { adminBookingRoutes } from './modules/bookings/bookings.routes.js';
 import { adminOpsRoutes } from './modules/admin/admin.routes.js';
 import { webhookRoutes } from './modules/payments/webhooks.routes.js';
+import { runBackgroundJobs } from './modules/jobs.js';
 
 export type TokenUser = { sub: string; kind: 'staff' | 'customer'; role?: string };
 
@@ -117,6 +119,12 @@ export async function buildApp() {
   });
 
   app.get('/health', async () => ({ ok: true }));
+  app.get('/internal/run-jobs', async (req, reply) => {
+    if (!config.cronSecret) return reply.status(404).send({ error: { code: 'not_found', message: 'Not found' } });
+    const digest = (s: string) => crypto.createHash('sha256').update(s).digest();
+    if (!crypto.timingSafeEqual(digest(req.headers.authorization ?? ''), digest(`Bearer ${config.cronSecret}`))) throw unauthorized();
+    return runBackgroundJobs();
+  });
   await app.register(authRoutes, { prefix: '/api' });
   await app.register(publicRoutes, { prefix: '/api/public' });
   await app.register(customerRoutes, { prefix: '/api/me' });

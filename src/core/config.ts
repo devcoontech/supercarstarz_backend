@@ -51,4 +51,6 @@ export const config = {
   mailFrom: process.env.MAIL_FROM || 'Supercarstars <no-reply@localhost>',
   stripeSecretFallback: process.env.STRIPE_SECRET_KEY || '',
   stripeWebhookFallback: process.env.STRIPE_WEBHOOK_SECRET || '',
+  /** Protects /internal/run-jobs. Unset: the route doesn't exist. */
+  cronSecret: process.env.CRON_SECRET || '',
 };
