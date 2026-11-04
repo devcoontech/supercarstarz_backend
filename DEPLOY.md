@@ -11,7 +11,7 @@ Run the server commands as root on the VPS.
 
 ## Deploying with Coolify
 
-Coolify deploys one repo per application, so it runs three separate resources: the database, the API and the dashboard. It also provides the proxy and HTTPS.
+Coolify deploys one repo per application, so it runs three separate resources. It also provides the proxy and HTTPS.
 
 | Resource | Source | Port | Domain |
 | --- | --- | --- | --- |
@@ -19,17 +19,64 @@ Coolify deploys one repo per application, so it runs three separate resources: t
 | API | `backend` repo, Dockerfile build pack | 4000 | `https://api.supercarstars.com` |
 | Dashboard | `dashboard` repo, Dockerfile build pack | 80 | `https://admin.supercarstars.com` |
 
-Set "Ports Exposes" only. Don't add port mappings, or the service becomes reachable without going through the proxy.
+Menu names can differ slightly between Coolify versions.
 
-**API environment variables (runtime):**
+### Part 1: Give Coolify its own HTTPS address
+
+1. In GoDaddy, add an A record: name `coolify`, value `193.160.119.12`, TTL 600.
+2. Once `nslookup coolify.supercarstars.com` shows the server's address, open **Settings > General** in Coolify.
+3. Set **URL** to `https://coolify.supercarstars.com` and save.
+4. Open that address and sign in. Use it from now on, so your password is encrypted.
+
+### Part 2: Create the project and connect GitHub
+
+1. Go to **Projects** and create one named `Supercarstars`, using the `production` environment.
+2. Go to **Sources > New source > GitHub App** and give it a name.
+3. Under automated installation, set the webhook endpoint to `https://coolify.supercarstars.com`, then choose **Register with GitHub**.
+4. Create the app, choose **Install repositories**, and select `supercarstarz_backend` and `supercarstarz_dashboard`.
+
+### Part 3: Create the database
+
+1. In the project, choose **+ New**, then **PostgreSQL**.
+2. **Select PostgreSQL 17 (`postgres:17-alpine`)**. Coolify defaults to 18, but the data move was rehearsed on 17.
+3. Name it `supercars-db`, start it, and leave any public port setting off.
+4. On its **General** page, copy **Postgres URL (internal)**. You'll use it as `DATABASE_URL` next.
+
+### Part 4: Deploy the API
+
+1. In the project, choose **+ New > Private Repository (with GitHub App)**, then choose this server, your GitHub App and `supercarstarz_backend`, then **Load Repository**.
+2. Use these settings, and save before deploying:
+
+| Setting | Value |
+| --- | --- |
+| Branch | `main` |
+| Build Pack | Dockerfile |
+| Base Directory | `/` |
+| Dockerfile Location | `/Dockerfile` |
+| Ports Exposes | `4000` |
+| Ports Mappings | Leave empty, or the API skips the proxy |
+| Domain | Protocol `https`, domain `api.supercarstars.com` |
+| Advanced > Build > Build arguments | **Managed manually in Dockerfile** |
+| Advanced > Deployment > Auto deploy | Deploy on push (webhooks) |
+
+The build-arguments setting matters because variables are available during builds by default, which can store secrets in the image's metadata.
+
+3. Under **Persistent Storage**, add two **Volume Mounts**. Without them, every deploy loses uploaded files.
+
+| Name | Destination path |
+| --- | --- |
+| `supercars-uploads` | `/app/uploads` |
+| `supercars-private-uploads` | `/app/private-uploads` |
+
+4. Under **Environment Variables**, add these. Generate each secret with `openssl rand -hex 32`. If you see **Available during build** on a variable, turn it off.
 
 ```ini
 NODE_ENV=production
 PORT=4000
-DATABASE_URL=<internal URL from the database's General page>
+DATABASE_URL=<Postgres URL (internal) from Part 3>
 DATABASE_SSL=false
-JWT_SECRET=<openssl rand -hex 32>
-SETTINGS_ENCRYPTION_KEY=<from your local backend/.env if moving data, otherwise openssl rand -hex 32>
+JWT_SECRET=<generated value>
+SETTINGS_ENCRYPTION_KEY=<copy exactly from your local backend/.env>
 CORS_ORIGINS=https://admin.supercarstars.com
 TRUST_PROXY=1
 PUBLIC_API_URL=https://api.supercarstars.com
@@ -37,19 +84,215 @@ UPLOAD_DIR=/app/uploads
 PRIVATE_UPLOAD_DIR=/app/private-uploads
 ```
 
-**API persistent storage:** add a volume mount for `/app/uploads` and one for `/app/private-uploads`. Without them, every deploy loses the uploaded files.
+Keep `SETTINGS_ENCRYPTION_KEY` the same as your local one, or your saved Stripe and email secrets won't decrypt. Don't add any `SUPABASE_*` variables, or uploads will keep going to Supabase.
 
-**API health check:** path `/health`, port 4000.
+5. Leave Coolify's **Healthcheck** page alone. The image has its own check, which Coolify uses instead.
+6. Choose **Deploy**. Migrations run automatically when the container starts. Then check it:
 
-**Dashboard environment variable (available during build):** `VITE_API_URL=https://api.supercarstars.com`
+```bash
+curl https://api.supercarstars.com/health
+```
 
-**Migrations** run automatically each time the API container starts.
+It should return `{"ok":true}`. A new certificate can take a minute or two.
 
-**Backups:** Coolify's database backups are stored on this server under `/data/coolify/backups` unless you add S3 storage. Schedule the database backup and back up both upload volumes too, then keep a copy off the server.
+### Part 5: Deploy the dashboard
 
-**Firewall:** use the Hostinger panel, because UFW may not block ports that Docker publishes. Allow 22, 80 and 443, plus 8000, 6001 and 6002 until the Coolify UI has its own domain, then close those three.
+1. Add another **Private Repository (with GitHub App)** resource using `supercarstarz_dashboard`.
+2. Use these settings:
 
-Don't run `backup.sh` on this setup, because it only works with the Compose stack.
+| Setting | Value |
+| --- | --- |
+| Branch | `main` |
+| Build Pack | Dockerfile |
+| Base Directory | `/` |
+| Dockerfile Location | `/Dockerfile` |
+| Ports Exposes | `80` |
+| Ports Mappings | Leave empty |
+| Domain | Protocol `https`, domain `admin.supercarstars.com` |
+
+3. Add one environment variable, with **Available during build** on, because it's fixed into the dashboard when it's built:
+
+```ini
+VITE_API_URL=https://api.supercarstars.com
+```
+
+4. Choose **Deploy**, then open `https://admin.supercarstars.com`. You won't be able to sign in until Part 6.
+
+### Part 6: Move your data from Supabase
+
+Do this when nobody is using the Supabase system, and before customers use this one. The clear step below **wipes this new database**, so never run it after going live. Supabase isn't changed.
+
+Run these on the server, as root. First find the two containers. Each command should print one name:
+
+```bash
+DB=$(docker ps --format '{{.Names}} {{.Image}}' | awk '/postgres:17/{print $1}'); echo "$DB"
+```
+
+```bash
+API=$(docker ps --filter expose=4000 --format '{{.Names}}'); echo "$API"
+```
+
+Clear the default rows the migrations created:
+
+```bash
+docker exec -i "$DB" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'EOF'
+DO $$
+DECLARE t text;
+BEGIN
+  SELECT string_agg(format('public.%I', tablename), ',') INTO t
+  FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations';
+  EXECUTE 'TRUNCATE ' || t || ' CASCADE';
+END $$;
+EOF
+```
+
+Paste `DATABASE_URL` from your local `backend/.env` when asked. The input is hidden:
+
+```bash
+read -rsp "Supabase DATABASE_URL: " SRC_DB && export SRC_DB && echo
+```
+
+Copy the data straight across, so no file containing customer data is left on the server. A warning about circular foreign keys on `booking_charges` is expected:
+
+```bash
+docker exec -e SRC_DB "$DB" sh -c 'set -o pipefail; pg_dump "$SRC_DB" --data-only --schema=public --exclude-table=public.schema_migrations -Fc | pg_restore -U postgres -d postgres --data-only --disable-triggers --no-owner --exit-on-error'; echo "copy exit: $?"
+```
+
+It must end with `copy exit: 0`. Check the counts against Supabase:
+
+```bash
+docker exec "$DB" psql -U postgres -d postgres -c "select (select count(*) from bookings) bookings, (select count(*) from vehicles) cars, (select count(*) from customers) customers, (select count(*) from payments) payments, (select count(*) from staff_users) staff"
+```
+
+Now copy the files. Paste `SUPABASE_URL`, then `SUPABASE_SERVICE_ROLE_KEY`, from your local `backend/.env`:
+
+```bash
+read -rp "Supabase URL: " SOURCE_SUPABASE_URL && export SOURCE_SUPABASE_URL
+```
+
+```bash
+read -rsp "Supabase service key: " SOURCE_SUPABASE_SERVICE_ROLE_KEY && export SOURCE_SUPABASE_SERVICE_ROLE_KEY && echo
+```
+
+```bash
+docker exec -e SOURCE_SUPABASE_URL -e SOURCE_SUPABASE_SERVICE_ROLE_KEY "$API" node dist/scripts/storage-to-disk.js
+```
+
+It should end with `0 failed`, and it's safe to run again. Finally, clear the secrets from your session and restart the API:
+
+```bash
+unset SRC_DB SOURCE_SUPABASE_URL SOURCE_SUPABASE_SERVICE_ROLE_KEY; docker restart "$API"
+```
+
+Keep the Supabase project for at least a week after going live.
+
+If you aren't moving any data, skip this part and create the owner instead. Add `SEED_OWNER_EMAIL` and `SEED_OWNER_PASSWORD` to the API's variables and redeploy, run `node dist/scripts/seed.js` in its Terminal, then remove both variables. Never use `--demo` here.
+
+### Part 7: Check everything and finish the settings
+
+1. Sign in at `https://admin.supercarstars.com` with your existing owner account.
+2. Open a car and a driver to check that their images and licence photos load.
+3. Under **Settings, Email (SMTP)**, test the connection and send a test email.
+4. In Stripe, stay in **test mode** while testing. Add the webhook `https://api.supercarstars.com/api/webhooks/stripe` with these events: `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `refund.created`, `refund.updated`.
+5. Save that webhook's new signing secret in the dashboard under **Settings, Payments and Stripe**. Don't skip this, or paid bookings won't be marked as paid.
+6. Set the dashboard address to `https://admin.supercarstars.com` in the business settings, so links in owner emails work. It's currently empty.
+7. Check that the login limit can't be bypassed. Run this on the server. It should print `401` several times, then `429`:
+
+```bash
+for i in $(seq 1 12); do curl -s -o /dev/null -w "%{http_code} " -H 'content-type: application/json' -H "X-Forwarded-For: 9.9.9.$i" -d '{"email":"nobody@example.com","password":"wrong-password"}' https://api.supercarstars.com/api/auth/staff/login; done; echo
+```
+
+8. Check that the API can only be reached through the proxy. From your PC, this should time out:
+
+```bash
+curl -m 5 http://193.160.119.12:4000/health
+```
+
+### Part 8: Set up backups
+
+1. **Database:** open `supercars-db`, then **Backups > + Add**. Use a frequency of `daily` and keep 14 days.
+2. **Uploaded files:** open the API, then **Backups > Storage backups > Add**. Add a daily schedule for each of the two volumes.
+3. **Off the server:** add S3-compatible storage under **S3 storage** and enable it on both. Otherwise the backups only live on this server, under `/data/coolify/backups` for the database. They contain customer data and licence photos, so keep them private.
+4. **Test a restore:** database backups restore from the database's **Backups > Import backup**. Coolify doesn't restore file backups from its UI, so those have to be downloaded and restored by hand.
+
+Don't run `deploy/backup.sh` on this setup, because it only works with the Compose stack.
+
+### Part 9: Lock the server down
+
+1. In the Hostinger firewall, remove the rules for ports `8000`, `6001` and `6002`, then check that `https://coolify.supercarstars.com` still works, including live updates and the Terminal.
+2. Turn off password logins for SSH. Keep your current session open, and test from a second window before closing it:
+
+```bash
+ssh -i "$env:USERPROFILE\.ssh\supercars_vps" root@193.160.119.12
+```
+
+Only when that works, run this on the server:
+
+```bash
+echo "PasswordAuthentication no" > /etc/ssh/sshd_config.d/00-no-password.conf && sshd -t && systemctl reload ssh
+```
+
+The Hostinger **Web console** is still available if you ever get locked out.
+
+### Part 10: Build the app for phones
+
+The server must be live first, because the app calls `https://api.supercarstars.com`. Run these from `mobile/` on your PC.
+
+Update the packages Expo reports as out of date, and commit the result:
+
+```bash
+npx expo install --fix
+```
+
+```bash
+eas login
+```
+
+Android gives you an APK with an install link and QR code:
+
+```bash
+eas build --profile preview --platform android
+```
+
+An iPhone build needs a paid Apple Developer account, and each test phone registered first:
+
+```bash
+eas device:create
+```
+
+```bash
+eas build --profile preview --platform ios
+```
+
+Test a booking with Stripe's test card `4242 4242 4242 4242`, then confirm the booking shows as paid in the dashboard.
+
+**Before submitting to the app stores:**
+- Add in-app account deletion, which both stores require for apps with sign-up.
+- Publish a privacy policy page and link to it in the store listings and the app.
+- Switch Stripe to live keys and a live webhook.
+- Clear test bookings and customers, and replace the placeholder car photos.
+
+Then use the store build commands under **Release to the stores** at the end of this guide.
+
+### Deploying updates
+
+Push to `main` in the `backend` or `dashboard` repo, and Coolify builds and deploys that app. Migrations run automatically. If the new version fails to start or fails its health check, Coolify can keep the old one running. `mobile` updates need a new EAS build.
+
+### If something goes wrong
+
+| Symptom | Likely cause |
+| --- | --- |
+| API build fails | Read the deployment log in Coolify. Confirm the build arguments setting in Part 4 |
+| Container keeps restarting | Open its logs. A missing variable or wrong `DATABASE_URL` is the usual cause |
+| `No available server` or `503` | The container isn't healthy yet, or Ports Exposes is wrong |
+| Certificate error | DNS isn't pointing at the server, or port 80 is blocked |
+| Dashboard shows a network or CORS error | Check `CORS_ORIGINS`. If `VITE_API_URL` changed, redeploy the dashboard |
+| Stripe or email secrets fail | `SETTINGS_ENCRYPTION_KEY` doesn't match your local value |
+| Images disappear after a deploy | The Persistent Storage mounts are missing |
+
+## Deploying with plain Docker Compose
+
+Skip this section if you're using Coolify.
 
 ## 1. Point the domain at the server
 
