@@ -1,7 +1,7 @@
 # Dedicated Postgres for Supercarstars. Host port 5440 avoids clashing with other local containers.
 services:
   db:
-    image: postgres:16
+    image: postgres:${POSTGRES_VERSION:-16}
     container_name: supercarstars-postgres
     restart: unless-stopped
     environment:

@@ -12,6 +12,7 @@
     "seed": "tsx src/scripts/seed.ts",
     "email:preview": "tsx src/scripts/email-preview.ts",
     "storage:migrate": "tsx src/scripts/storage-migrate.ts",
+    "storage:to-disk": "tsx src/scripts/storage-to-disk.ts",
     "test": "vitest run"
   },
   "dependencies": {
