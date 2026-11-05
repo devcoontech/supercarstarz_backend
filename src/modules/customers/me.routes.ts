@@ -7,6 +7,8 @@ import { myPaymentRoutes } from '../payments/my-payments.routes.js';
 import { myExtensionRoutes } from '../bookings/my-extensions.routes.js';
 import { myDocumentRoutes } from '../finance/my-documents.routes.js';
 
+const pushToken = z.string().max(200).regex(/^Expo(nent)?PushToken\[[^\]]+\]$/, 'Not a valid push token');
+
 export async function customerRoutes(app: FastifyInstance) {
   app.addHook('onRequest', app.customerOnly);
 
@@ -44,6 +46,24 @@ export async function customerRoutes(app: FastifyInstance) {
 
   app.post('/notifications/read', async (req) => {
     await pool.query('UPDATE notifications SET read_at=now() WHERE customer_id=$1 AND read_at IS NULL', [req.user.sub]);
+    return { ok: true };
+  });
+
+  /** Called by the app after sign-in. A phone belongs to whoever last signed in on it. */
+  app.post('/push-tokens', async (req) => {
+    const b = z.object({ token: pushToken, platform: z.enum(['ios', 'android']) }).parse(req.body);
+    await pool.query(
+      `INSERT INTO push_tokens(token, customer_id, platform) VALUES ($1,$2,$3)
+       ON CONFLICT (token) DO UPDATE SET customer_id=EXCLUDED.customer_id, platform=EXCLUDED.platform, updated_at=now()`,
+      [b.token, req.user.sub, b.platform],
+    );
+    return { ok: true };
+  });
+
+  /** Called by the app on sign-out. */
+  app.post('/push-tokens/remove', async (req) => {
+    const b = z.object({ token: pushToken }).parse(req.body);
+    await pool.query('DELETE FROM push_tokens WHERE token=$1 AND customer_id=$2', [b.token, req.user.sub]);
     return { ok: true };
   });
 }
