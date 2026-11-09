@@ -58,6 +58,7 @@ export const DEFAULT_SETTINGS = {
   'company.altPhone': '',
   'company.vatNumber': '',
   'company.websiteUrl': 'https://supercarstars.com', // linked from the buttons and footer of customer emails
+  'company.privacyUrl': '', // the published privacy policy, linked from the app (required by Google Play and the App Store)
   'company.dashboardUrl': '', // admin dashboard address, linked from owner emails ("Open in dashboard")
   'notifications.ownerEmails': '', // comma separated; who gets new booking / confirmed / cancellation emails (blank = support email)
 } as const;

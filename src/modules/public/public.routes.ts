@@ -166,7 +166,7 @@ export async function publicRoutes(app: FastifyInstance) {
   app.get('/config', async () => {
     const s = await getSettings();
     return {
-      company: { name: s['company.name'], supportEmail: s['company.supportEmail'] || null, supportPhone: s['company.supportPhone'] || null },
+      company: { name: s['company.name'], supportEmail: s['company.supportEmail'] || null, supportPhone: s['company.supportPhone'] || null, privacyUrl: s['company.privacyUrl'] || null, websiteUrl: s['company.websiteUrl'] || null },
       booking: {
         timezone: s['booking.timezone'], openHour: s['booking.openHour'], closeHour: s['booking.closeHour'], minLeadHours: s['booking.minLeadHours'],
         requireApproval: s['booking.requireApproval'], holdMinutes: s['booking.holdMinutes'],
@@ -181,6 +181,32 @@ export async function publicRoutes(app: FastifyInstance) {
       payment: { mode: s['payment.mode'], depositPercentBp: s['payment.depositPercentBp'], serviceFeeBp: s['pricing.serviceFeeBp'] },
       stripe: { publishableKey: s['stripe.publishableKey'] || null },
     };
+  });
+
+  /**
+   * Public page explaining how to delete a Supercarstars account (Google Play asks for a web link as well as the
+   * in-app option). https://api.supercarstars.com/api/public/account-deletion
+   */
+  app.get('/account-deletion', async (_req, reply) => {
+    const s = await getSettings();
+    const esc = (v: string) => v.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
+    const name = esc(s['company.name'] || 'Supercarstars');
+    const email = s['company.supportEmail'].trim();
+    const contact = email ? `<a href="mailto:${esc(email)}?subject=Delete%20my%20account">${esc(email)}</a>` : 'our support team';
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Delete your ${name} account</title><style>body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:680px;margin:0 auto;padding:32px 20px;color:#15161a;line-height:1.55}
+h1{font-size:26px}h2{font-size:18px;margin-top:28px}li{margin:6px 0}.box{background:#fff8e1;border:1px solid #f0d27a;border-radius:10px;padding:14px 16px}</style></head><body>
+<h1>Delete your ${name} account</h1>
+<h2>In the app (quickest)</h2>
+<ol><li>Open the ${name} app and sign in.</li><li>Go to <b>Profile</b>, then <b>Delete account</b>.</li><li>Enter your password to confirm. Your account is deleted straight away.</li></ol>
+<h2>Without the app</h2>
+<p>Email ${contact} from the email address on your account and ask us to delete it. We'll confirm within 30 days.</p>
+<h2>What is deleted, and what is kept</h2>
+<ul><li><b>Deleted:</b> your name, email address, phone number, postcode and city, your password, notes and occasion details you added to bookings, your notifications and the phones registered for notifications.</li>
+<li><b>Kept, without your name or contact details:</b> booking, payment and receipt records, because UK law requires businesses to keep financial records (usually for 6 years).</li></ul>
+<p class="box">If you have a booking that is still to come or under way, cancel it or wait until it has finished before deleting your account.</p>
+</body></html>`;
+    return reply.type('text/html; charset=utf-8').send(html);
   });
 
   app.get('/event-types', async () => {

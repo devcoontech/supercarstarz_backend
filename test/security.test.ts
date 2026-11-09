@@ -251,3 +251,38 @@ describe('CSV export', () => {
     expect(csv).toBe('reason\n"Changed plans\r=1+1"');
   });
 });
+
+describe('customers can delete their account (store requirement)', () => {
+  it('needs the password, refuses while a booking is upcoming, then erases personal details and ends every session', async () => {
+    const v = await makeVehicle();
+    const c = await makeCustomer(app, 'leaver@test.com');
+    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json();
+
+    expect((await post('/api/me/delete', c.h, { password: 'wrong-password' })).statusCode).toBe(401);
+    const blocked = await post('/api/me/delete', c.h, { password: 'password-123' });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json().error.code).toBe('has_active_bookings');
+
+    await post(`/api/me/bookings/${bk.id}/cancel`, c.h, {});
+    expect((await post('/api/me/delete', c.h, { password: 'password-123' })).statusCode).toBe(200);
+
+    const row = (await pool.query('SELECT email, name, phone, deleted_at FROM customers WHERE id=$1', [c.id])).rows[0];
+    expect(row.email).not.toContain('leaver');
+    expect(row.name).toBe('Deleted customer');
+    expect(row.deleted_at).not.toBeNull();
+    // The booking record stays (for accounting), the old token no longer works, and the old login is gone.
+    expect((await pool.query('SELECT 1 FROM bookings WHERE id=$1', [bk.id])).rowCount).toBe(1);
+    expect((await get('/api/me', c.h)).statusCode).toBe(401);
+    const login = await app.inject({ method: 'POST', url: '/api/auth/customer/login', payload: { email: 'leaver@test.com', password: 'password-123' } });
+    expect(login.statusCode).toBe(401);
+    // The email can be used again for a new account.
+    expect((await app.inject({ method: 'POST', url: '/api/auth/customer/register', payload: { email: 'leaver@test.com', password: 'password-123', name: 'New' } })).statusCode).toBe(201);
+  });
+
+  it('serves the public account-deletion page', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/public/account-deletion' });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['content-type']).toContain('text/html');
+    expect(r.body).toContain('Delete account');
+  });
+});

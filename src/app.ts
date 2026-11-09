@@ -86,9 +86,9 @@ export async function buildApp() {
     }
     if (req.user.kind !== 'customer') throw forbidden('Customer access only');
     // A password reset signs out every older session.
-    const row = (await pool.query('SELECT password_changed_at FROM customers WHERE id=$1', [req.user.sub])).rows[0];
+    const row = (await pool.query('SELECT password_changed_at, deleted_at FROM customers WHERE id=$1', [req.user.sub])).rows[0];
     const iat = (req.user as unknown as { iat?: number }).iat ?? 0;
-    if (!row || (row.password_changed_at && iat < Math.floor(row.password_changed_at.getTime() / 1000))) throw unauthorized('Please sign in again');
+    if (!row || row.deleted_at || (row.password_changed_at && iat < Math.floor(row.password_changed_at.getTime() / 1000))) throw unauthorized('Please sign in again');
   });
 
   app.setErrorHandler((err: any, req: FastifyRequest, reply: FastifyReply) => {

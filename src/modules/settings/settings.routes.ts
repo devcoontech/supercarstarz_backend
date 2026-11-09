@@ -68,7 +68,7 @@ export function settingsRoutes(app: FastifyInstance) {
         if (k === 'company.logoUrl') throw badRequest('Upload the logo with the logo button');
         if (k.startsWith('company.') && String(v).length > 2000) throw badRequest(`${k} is too long`);
         if (k === 'notifications.ownerEmails' && String(v).trim() && !String(v).split(/[,;\s]+/).filter(Boolean).every((e) => z.string().email().safeParse(e).success)) throw badRequest('Owner notification emails must be email addresses separated by commas');
-        if ((k === 'company.websiteUrl' || k === 'company.dashboardUrl') && String(v).trim() && !/^https?:\/\/\S+$/i.test(String(v).trim())) throw badRequest('Links must start with https://');
+        if ((k === 'company.websiteUrl' || k === 'company.dashboardUrl' || k === 'company.privacyUrl') && String(v).trim() && !/^https?:\/\/\S+$/i.test(String(v).trim())) throw badRequest('Links must start with https://');
         if (k === 'email.host' && v && !/^[A-Za-z0-9.-]+$/.test(String(v).trim())) throw badRequest('Email server must be a host name like smtp.example.com');
         if (k === 'maps.provider' && v !== 'osm' && v !== 'google') throw badRequest('Map provider must be osm or google');
         if (k === 'maps.countryCodes' && !/^([a-zA-Z]{2})(,\s*[a-zA-Z]{2})*$/.test(String(v).trim())) throw badRequest('Countries must be two-letter codes separated by commas, e.g. gb,ie');

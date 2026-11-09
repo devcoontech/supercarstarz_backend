@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { pool } from '../../core/db.js';
+import { pool, tx } from '../../core/db.js';
+import { deleteCustomerAccount } from './delete-account.js';
 import { notFound } from '../../core/errors.js';
 import { myBookingRoutes } from '../bookings/my-bookings.routes.js';
 import { myPaymentRoutes } from '../payments/my-payments.routes.js';
@@ -46,6 +47,16 @@ export async function customerRoutes(app: FastifyInstance) {
 
   app.post('/notifications/read', async (req) => {
     await pool.query('UPDATE notifications SET read_at=now() WHERE customer_id=$1 AND read_at IS NULL', [req.user.sub]);
+    return { ok: true };
+  });
+
+  /**
+   * Deletes the signed-in customer's account (asks for the password again). Personal details are erased; bookings and
+   * receipts stay, anonymised, for accounting. Refused while a booking is still to come or under way.
+   */
+  app.post('/delete', { config: { rateLimit: { max: process.env.NODE_ENV === 'test' ? 10000 : 5, timeWindow: '1 minute' } } }, async (req) => {
+    const b = z.object({ password: z.string().min(1).max(200) }).parse(req.body);
+    await tx((c) => deleteCustomerAccount(c, req.user.sub, b.password));
     return { ok: true };
   });
 
