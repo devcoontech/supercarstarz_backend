@@ -11,7 +11,7 @@ const idParams = z.object({ id });
 export function pricingRuleRoutes(app: FastifyInstance) {
   // Every price belongs to a car: a rule's car is set when it is created and never changes.
   const ruleBody = z.object({
-    vehicleId: id, eventTypeId: id.nullish(), kind: z.enum(['hourly', 'package', 'extra_hour', 'special_date', 'per_mile']), label: z.string().max(80).nullish(),
+    vehicleId: id, eventTypeId: id.nullish(), kind: z.enum(['hourly', 'package', 'extra_hour', 'special_date', 'per_mile', 'daily']), label: z.string().max(80).nullish(),
     hours: z.number().int().min(1).nullish(), amountPence: z.number().int().min(0).nullish(), minAmountPence: z.number().int().min(0).nullish(), multiplierBp: z.number().int().min(1).max(100000).nullish(),
     startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(), endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(), active: z.boolean().default(true),
   });

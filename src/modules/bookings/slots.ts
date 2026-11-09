@@ -5,6 +5,30 @@ import { type Settings } from '../../core/settings.js';
 
 /** Booking times: building a slot from a date and time, buffers, and checking a car is free. */
 
+/*
+ * Day bookings: a booking of 24 hours or more is booked in whole days, 1 day = 24 hours from the start time
+ * (10:00 Saturday for 2 days ends 10:00 Monday). It must start within opening hours; the same-day closing time does
+ * not apply. Shorter bookings are hourly and must start and finish within opening hours on one day.
+ */
+export const HOURS_PER_DAY = 24;
+export const isDayBooking = (hours: number) => hours >= HOURS_PER_DAY;
+export const daysOf = (hours: number) => Math.floor(hours / HOURS_PER_DAY);
+
+/**
+ * Is this length allowed for this car? Hourly bookings use the car's minimum and maximum hours; day bookings must
+ * be whole days, up to the business's maximum, and only when day bookings are switched on (staff may always).
+ */
+export function assertDuration(s: Settings, v: { min_hours: number; max_hours: number }, hours: number, staff = false) {
+  if (isDayBooking(hours)) {
+    if (!staff && !s['booking.allowDailyBookings']) throw badRequest('Day bookings are not available. Choose a number of hours.', 'invalid_duration');
+    if (hours % HOURS_PER_DAY !== 0) throw badRequest('Day bookings are made in whole days (24 hours each)', 'invalid_duration');
+    const max = s['booking.maxDays'];
+    if (daysOf(hours) > max) throw badRequest(`Cars can be booked for up to ${max} ${max === 1 ? 'day' : 'days'}`, 'invalid_duration');
+    return;
+  }
+  if (hours < v.min_hours || hours > v.max_hours) throw badRequest(`This car can be booked for ${v.min_hours} to ${v.max_hours} hours, or by the day`, 'invalid_duration');
+}
+
 type C = pg.PoolClient;
 
 export function localToUtc(date: string, time: string, tz: string): DateTime {
@@ -49,7 +73,9 @@ export function buildSlot(
     const close = s['booking.closeHour'];
     if (ls.minute !== 0) throw badRequest('Bookings must start on the hour', 'invalid_start');
     const sameDay = ls.toISODate() === le.toISODate();
-    if (ls.hour < open || !sameDay || le.hour * 60 + le.minute > close * 60) {
+    if (isDayBooking(hours)) {
+      if (ls.hour < open || ls.hour >= close) throw badRequest(`Day bookings must start between ${open}:00 and ${close}:00`, 'outside_hours');
+    } else if (ls.hour < open || !sameDay || le.hour * 60 + le.minute > close * 60) {
       throw badRequest(`Bookings must fall between ${open}:00 and ${close}:00`, 'outside_hours');
     }
   }

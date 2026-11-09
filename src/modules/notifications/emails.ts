@@ -471,6 +471,13 @@ const OWNER: Record<string, Template> = {
     intro: (x) => [String(x.payload.title ?? 'The customer has asked to extend their booking.'), ...(x.payload.body ? [String(x.payload.body)] : [])],
     callout: () => ({ tone: 'warn', text: 'Approve or decline the extension in the dashboard.' }),
   }),
+  booking_extended: ownerAlert({
+    subject: (x) => `Booking extended: ${x.booking.ref} · ${x.booking.vehicle}`,
+    title: 'Booking extended',
+    badge: { text: 'Extended', tone: 'gold' },
+    intro: (x) => [`${x.customer.name} has extended booking ${x.booking.ref} in the app. The booking below shows the new time and price.`, ...(x.payload.body ? [String(x.payload.body)] : [])],
+    callout: (x) => (owed(x) > 0 ? { tone: 'info', text: `${gbp(owed(x))} is still to be paid by the customer.` } : { tone: 'success', text: 'Paid in full.' }),
+  }),
 };
 /** Money problems staff must act on: the notification's own title and text, plus the booking sheet. */
 for (const k of ['overpaid', 'payment_after_release', 'payment_mismatch']) {

@@ -21,3 +21,27 @@ export async function queueReminders(c: pg.PoolClient): Promise<number> {
   }
   return rows.length;
 }
+
+/**
+ * "Payment due" reminder: a confirmed order that still has money to pay (a deposit was paid, or a charge or
+ * extension was added) and starts within 3 days. Sent once per order as an in-app notification and phone push.
+ */
+export async function queueBalanceReminders(c: pg.PoolClient): Promise<number> {
+  const rows = (await c.query(
+    `SELECT DISTINCT ON (o.id) b.id, o.id AS order_id, o.customer_id, o.ref,
+            GREATEST(0, o.total_pence - (o.paid_pence - o.refunded_pence)) AS owed
+       FROM orders o JOIN bookings b ON b.order_id = o.id
+      WHERE b.status IN ('confirmed','driver_assigned')
+        AND b.start_at > now() AND b.start_at <= now() + interval '3 days'
+        AND o.total_pence - (o.paid_pence - o.refunded_pence) > 0
+        AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.dedupe_key = 'balance-due:' || o.id)
+      ORDER BY o.id, b.start_at`,
+  )).rows;
+  for (const r of rows) {
+    await notify(c, {
+      customerId: r.customer_id, bookingId: r.id, kind: 'balance_due', dedupeKey: `balance-due:${r.order_id}`,
+      title: 'Payment due', body: `£${(r.owed / 100).toFixed(2)} is left to pay on ${r.ref}. Open the booking to pay.`,
+    });
+  }
+  return rows.length;
+}

@@ -18,6 +18,10 @@ const gbp = (pence: number) => '£' + (pence % 100 === 0 ? String(pence / 100) :
  * charged at that level's `extra_hour` rate (else its hourly rate, else the vehicle rate).
  * If no package fits, hours x hourly rate.
  *
+ * Day bookings (24 hours or more): if a `daily` rule applies (most specific scope wins, same as hourly rates), each
+ * whole day costs the daily rate and any hours left over are charged at the hourly rate above. With no daily rule,
+ * a day is simply 24 hours priced as above (1 day = 24 hours).
+ *
  * Special-date rules multiply the duration charge. If several match the date, the most specific scope wins,
  * and ties go to the highest multiplier. Only one special-date rule is ever applied.
  *
@@ -33,7 +37,7 @@ export type PricingRule = {
   id: string;
   vehicle_id: string | null;
   event_type_id: string | null;
-  kind: 'hourly' | 'package' | 'extra_hour' | 'special_date' | 'per_mile';
+  kind: 'hourly' | 'package' | 'extra_hour' | 'special_date' | 'per_mile' | 'daily';
   label: string | null;
   hours: number | null;
   amount_pence: number | null;
@@ -136,6 +140,10 @@ const rank = (r: PricingRule, vehicleId: string, eventTypeId: string | null): nu
   return 0; // global rule (no vehicle, no event)
 };
 
+/** The daily rate that applies: the most specific scope wins (car + event, car, event, everywhere). */
+const dailyRule = (applicable: { r: PricingRule; rk: number }[]) =>
+  applicable.filter((x) => x.r.kind === 'daily').sort((a, b) => b.rk - a.rk)[0]?.r;
+
 export function priceItem(i: Omit<PriceInput, 'offer'>): ItemPrice {
   const { vehicle, hours } = i;
   if (!Number.isInteger(hours) || hours < 1) throw badRequest('Hours must be a positive whole number');
@@ -169,6 +177,14 @@ export function priceItem(i: Omit<PriceInput, 'offer'>): ItemPrice {
     duration = Math.max(top.min_amount_pence ?? 0, Math.round(miles * top.amount_pence!));
     basis = `${milesLabel(miles)} at ${gbp(top.amount_pence!)} per mile${top.min_amount_pence && duration === top.min_amount_pence ? ` (minimum ${gbp(top.min_amount_pence)})` : ''}`;
     applied.push(top.id);
+  } else if (hours >= 24 && dailyRule(applicable)) {
+    const day = dailyRule(applicable)!;
+    const days = Math.floor(hours / 24);
+    const rest = hours - days * 24;
+    duration = days * day.amount_pence! + rest * baseRate;
+    basis = `${days} ${days === 1 ? 'day' : 'days'} at ${gbp(day.amount_pence!)} per day${rest ? ` + ${rest}h at hourly rate` : ''}`;
+    applied.push(day.id);
+    if (rest && hourlyRule) applied.push(hourlyRule.id);
   } else if (pkg) {
     const extra = hours - pkg.hours!;
     duration = pkg.amount_pence! + extra * extraRate;
@@ -177,7 +193,7 @@ export function priceItem(i: Omit<PriceInput, 'offer'>): ItemPrice {
     if (extra > 0 && extraRule) applied.push(extraRule.id);
   } else {
     duration = baseRate * hours;
-    basis = `${hours}h at hourly rate`;
+    basis = hours >= 24 && hours % 24 === 0 ? `${hours / 24} ${hours === 24 ? 'day' : 'days'} (${hours}h at hourly rate)` : `${hours}h at hourly rate`;
     if (hourlyRule) applied.push(hourlyRule.id);
   }
 

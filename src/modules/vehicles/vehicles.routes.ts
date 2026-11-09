@@ -63,10 +63,14 @@ const vehicleAdminSelect = `
     COALESCE((SELECT json_agg(x.addon_id) FROM vehicle_addons x WHERE x.vehicle_id=v.id), '[]') AS addon_ids
   FROM vehicles v`;
 
+/** Bookings that hold a car (not finished, cancelled or failed). */
+const LIVE_STATUSES = `'pending','awaiting_payment','confirmed','driver_assigned','in_progress','cancellation_requested'`;
+
 export function vehicleRoutes(app: FastifyInstance) {
   app.get('/vehicles', async (req) => {
     const q = z.object({
       status: z.enum(['active', 'inactive', 'maintenance']).optional(), published: z.enum(['true', 'false']).optional(), q: z.string().max(80).optional(),
+      booking: z.enum(['now', 'upcoming', 'none']).optional(),
       limit: z.coerce.number().int().min(1).max(200).default(50), offset: z.coerce.number().int().min(0).default(0),
     }).parse(req.query);
     const w = ['v.deleted_at IS NULL'];
@@ -74,8 +78,30 @@ export function vehicleRoutes(app: FastifyInstance) {
     if (q.status) { p.push(q.status); w.push(`v.operational_status=$${p.length}`); }
     if (q.published) { p.push(q.published === 'true'); w.push(`v.published=$${p.length}`); }
     if (q.q) { p.push(`%${q.q}%`); w.push(`(v.make||' '||v.model||' '||coalesce(v.fleet_ref,'')) ILIKE $${p.length}`); }
+    const live = `b.vehicle_id=v.id AND b.status IN (${LIVE_STATUSES})`;
+    if (q.booking === 'now') w.push(`EXISTS (SELECT 1 FROM bookings b WHERE ${live} AND b.start_at <= now() AND b.end_at > now())`);
+    if (q.booking === 'upcoming') w.push(`EXISTS (SELECT 1 FROM bookings b WHERE ${live} AND b.end_at > now())`);
+    if (q.booking === 'none') w.push(`NOT EXISTS (SELECT 1 FROM bookings b WHERE ${live} AND b.end_at > now())`);
     p.push(q.limit, q.offset);
     const rows = (await pool.query(`${vehicleAdminSelect} WHERE ${w.join(' AND ')} ORDER BY v.created_at DESC LIMIT $${p.length - 1} OFFSET $${p.length}`, p)).rows;
+    // Which cars are booked: the booking running right now (if any), the next one, and how many are still to come.
+    if (rows.length) {
+      const card = `json_build_object('id', b.id, 'ref', b.ref, 'status', b.status, 'startAt', b.start_at, 'endAt', b.end_at, 'customer', c.name)`;
+      const booked = (await pool.query(
+        `SELECT b.vehicle_id, count(*)::int AS upcoming,
+           (array_agg(${card} ORDER BY b.start_at) FILTER (WHERE b.start_at <= now()))[1] AS current,
+           (array_agg(${card} ORDER BY b.start_at) FILTER (WHERE b.start_at > now()))[1] AS next
+         FROM bookings b JOIN customers c ON c.id=b.customer_id
+         WHERE b.vehicle_id = ANY($1::uuid[]) AND b.status IN (${LIVE_STATUSES}) AND b.end_at > now()
+         GROUP BY b.vehicle_id`, [rows.map((r) => r.id)])).rows;
+      const byCar = new Map(booked.map((r) => [r.vehicle_id, r]));
+      for (const r of rows) {
+        const x = byCar.get(r.id);
+        r.booking_now = x?.current ?? null;
+        r.next_booking = x?.next ?? null;
+        r.upcoming_bookings = x?.upcoming ?? 0;
+      }
+    }
     const total = (await pool.query(`SELECT count(*)::int n FROM vehicles v WHERE ${w.join(' AND ')}`, p.slice(0, -2))).rows[0].n;
     return { items: rows, total };
   });

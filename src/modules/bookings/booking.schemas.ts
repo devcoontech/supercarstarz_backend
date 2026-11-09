@@ -8,7 +8,7 @@ const POINT = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-
 /** One vehicle in a booking request. The same shape for quotes, customer bookings and staff bookings. */
 export const itemSchema = z.object({
   vehicleId: z.string().uuid(), eventTypeId: z.string().uuid().nullish(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  time: z.string().regex(/^\d{2}:\d{2}$/), hours: z.number().int().min(1).max(24), experience: z.enum(['stationary', 'delivered']),
+  time: z.string().regex(/^\d{2}:\d{2}$/), hours: z.number().int().min(1).max(24 * 60).refine((h) => h <= 24 || h % 24 === 0, 'Day bookings are made in whole days (24 hours each)'), experience: z.enum(['stationary', 'delivered']),
   address: z.string().max(300).nullish(), children: z.number().int().min(0).max(50).nullish(), occasion: z.string().max(200).nullish(),
   driverOption: z.enum(['with_driver', 'self_drive']).nullish(), chauffeur: z.boolean().optional(),
   addonIds: z.array(z.string().uuid()).max(20).optional(), addons: z.array(z.object({ id: z.string().uuid(), quantity: z.number().int().min(1).max(100).default(1) })).max(20).optional(),

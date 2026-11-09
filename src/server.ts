@@ -4,7 +4,7 @@ import { pool, tx } from './core/db.js';
 import { expireHolds } from './modules/bookings/status.js';
 import { processOutbox } from './modules/notifications/emails.js';
 import { checkPushReceipts, processPushOutbox } from './modules/notifications/push.js';
-import { queueReminders } from './modules/notifications/reminders.js';
+import { queueBalanceReminders, queueReminders } from './modules/notifications/reminders.js';
 
 const app = await buildApp();
 
@@ -29,6 +29,7 @@ const pushReceiptTimer = setInterval(() => {
 // Queues "see you tomorrow" reminders for bookings starting in the next 24 hours (each sent once).
 const reminderTimer = setInterval(() => {
   tx((c) => queueReminders(c)).catch((e) => app.log.error({ err: e }, 'queueReminders failed'));
+  tx((c) => queueBalanceReminders(c)).catch((e) => app.log.error({ err: e }, 'queueBalanceReminders failed'));
 }, 15 * 60_000);
 
 const shutdown = async () => {

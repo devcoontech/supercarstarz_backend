@@ -45,10 +45,18 @@ async function check(c: C, b: any, v: any, s: Settings, hours: number, staff: bo
   const start = DateTime.fromJSDate(b.start_at);
   const newEnd = DateTime.fromJSDate(b.end_at).plus({ hours });
   if (!staff) {
-    if (b.hours + hours > v.max_hours) return { ok: false, code: 'too_long', reason: `This car can be booked for up to ${v.max_hours} hours in one go.` };
     const ls = start.setZone(tz), le = newEnd.setZone(tz);
-    if (ls.toISODate() !== le.toISODate() || le.hour * 60 + le.minute > s['booking.closeHour'] * 60) {
-      return { ok: false, code: 'outside_hours', reason: `Bookings must finish by ${s['booking.closeHour']}:00.` };
+    if (b.hours >= 24) {
+      // A day booking can run a few hours longer, as long as it is handed back within opening hours.
+      if (b.hours + hours > s['booking.maxDays'] * 24 + MAX_EXTENSION_HOURS) return { ok: false, code: 'too_long', reason: `Cars can be booked for up to ${s['booking.maxDays']} days.` };
+      if (le.hour * 60 + le.minute > s['booking.closeHour'] * 60 || le.hour < s['booking.openHour']) {
+        return { ok: false, code: 'outside_hours', reason: `The car must be returned between ${s['booking.openHour']}:00 and ${s['booking.closeHour']}:00.` };
+      }
+    } else {
+      if (b.hours + hours > v.max_hours) return { ok: false, code: 'too_long', reason: `This car can be booked for up to ${v.max_hours} hours in one go.` };
+      if (ls.toISODate() !== le.toISODate() || le.hour * 60 + le.minute > s['booking.closeHour'] * 60) {
+        return { ok: false, code: 'outside_hours', reason: `Bookings must finish by ${s['booking.closeHour']}:00.` };
+      }
     }
   }
   try {
@@ -192,6 +200,9 @@ export async function applyExtension(c: C, bookingId: string, hours: number, act
   await notify(c, {
     customerId: b.customer_id, bookingId: b.id, kind: 'booking_extended', dedupeKey: `extended:${ext.id}`,
     title: 'Booking extended', body: `${b.ref} now ends at ${hhmm(newEnd, tz)}.${owed ? ` £${(owed / 100).toFixed(2)} left to pay.` : ''}`,
+    // The owner is emailed when the customer extends it themselves; staff extensions/approvals don't email the owner.
+    // The customer always gets the in-app notification, an email and a push to their phone.
+    ownerEmail: actor.type !== 'staff',
   });
   return { extension: (await c.query('SELECT * FROM booking_extensions WHERE id=$1', [ext.id])).rows[0], order: after };
 }

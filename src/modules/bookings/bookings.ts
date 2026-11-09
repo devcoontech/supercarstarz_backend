@@ -4,7 +4,7 @@ import { loadRules, priceItem, type AddonRow, type ItemPrice } from '../pricing/
 import { getSettings, type Settings } from '../../core/settings.js';
 import type { Geo } from './geo.js';
 import { createOrder } from './orders.js';
-import { effectiveBuffer, type Slot, buildSlot } from './slots.js';
+import { effectiveBuffer, type Slot, buildSlot, assertDuration } from './slots.js';
 
 type C = pg.PoolClient;
 
@@ -59,7 +59,7 @@ export async function prepareItem(c: C, i: BookingInput, staff = false): Promise
   if (!v) throw notFound('Vehicle not found');
   if (!staff && (!v.published || v.operational_status !== 'active')) throw conflict('This car is not available for booking', 'vehicle_unavailable');
   if (v.operational_status !== 'active') throw conflict('This car is not currently in service', 'vehicle_unavailable');
-  if (i.hours < v.min_hours || i.hours > v.max_hours) throw badRequest(`This car can be booked for ${v.min_hours} to ${v.max_hours} hours`, 'invalid_duration');
+  assertDuration(settings, v, i.hours, staff);
 
   let eventTypeId: string | null = i.eventTypeId ?? null;
   let eventBasis: 'hourly' | 'distance' = 'hourly';

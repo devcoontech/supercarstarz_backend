@@ -6,7 +6,7 @@ import { badRequest, conflict, forbidden, notFound } from '../../core/errors.js'
 import { createBooking } from './bookings.js';
 import { notify } from '../notifications/notify.js';
 import { changeStatus, lockBooking, policyRefund, recalcTotal, type BookingStatus } from './status.js';
-import { assertSlotFree, buildSlot, effectiveBuffer, lockVehicle, rangeParam, slotFor } from './slots.js';
+import { assertSlotFree, buildSlot, effectiveBuffer, lockVehicle, rangeParam, slotFor, assertDuration } from './slots.js';
 import { logEvent } from './history.js';
 import { getSettings } from '../../core/settings.js';
 import { bookingAddons, loadFinance } from '../finance/finance.js';
@@ -139,7 +139,7 @@ export async function adminBookingRoutes(app: FastifyInstance) {
   app.post('/bookings', async (req, reply) => {
     const b = z.object({
       customerId: uuid, vehicleId: uuid, eventTypeId: uuid.nullish(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z.string().regex(/^\d{2}:\d{2}$/),
-      hours: z.number().int().min(1).max(24), experience: z.enum(['stationary', 'delivered']), address: z.string().max(300).nullish(), children: z.number().int().min(0).nullish(),
+      hours: z.number().int().min(1).max(24 * 60), experience: z.enum(['stationary', 'delivered']), address: z.string().max(300).nullish(), children: z.number().int().min(0).nullish(),
       occasion: z.string().max(200).nullish(), driverOption: z.enum(['with_driver', 'self_drive']).nullish(), chauffeur: z.boolean().optional(),
       addonIds: z.array(uuid).optional(), addons: z.array(z.object({ id: uuid, quantity: z.number().int().min(1).max(100).default(1) })).max(20).optional(), offerCode: z.string().max(40).nullish(),
       customerNotes: z.string().max(1000).nullish(), initialStatus: z.enum(['pending', 'awaiting_payment', 'confirmed']).default('awaiting_payment'),
@@ -165,7 +165,7 @@ export async function adminBookingRoutes(app: FastifyInstance) {
 
   app.post('/bookings/:id/reschedule', async (req) => {
     const { id } = z.object({ id: uuid }).parse(req.params);
-    const b = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z.string().regex(/^\d{2}:\d{2}$/), hours: z.number().int().min(1).max(24).optional(), reason: z.string().max(500).optional() }).parse(req.body);
+    const b = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z.string().regex(/^\d{2}:\d{2}$/), hours: z.number().int().min(1).max(24 * 60).optional(), reason: z.string().max(500).optional() }).parse(req.body);
     return tx(async (c) => {
       const cur = await lockBooking(c, id);
       await lockVehicle(c, cur.vehicle_id);
@@ -173,7 +173,7 @@ export async function adminBookingRoutes(app: FastifyInstance) {
       const v = (await c.query('SELECT * FROM vehicles WHERE id=$1', [cur.vehicle_id])).rows[0];
       const s = await getSettings(c);
       const hours = b.hours ?? cur.hours;
-      if (hours < v.min_hours || hours > v.max_hours) throw badRequest(`This car can be booked for ${v.min_hours} to ${v.max_hours} hours`, 'invalid_duration');
+      assertDuration(s, v, hours, true);
       const slot = buildSlot(s, effectiveBuffer(s, v), b.date, b.time, hours, { skipLead: true });
       await assertSlotFree(c, v.id, slot, id);
       if (cur.driver_id) {
@@ -212,7 +212,7 @@ export async function adminBookingRoutes(app: FastifyInstance) {
       const s = await getSettings(c);
       const v = (await c.query('SELECT * FROM vehicles WHERE id=$1 AND deleted_at IS NULL', [b.vehicleId])).rows[0];
       if (!v || v.operational_status !== 'active') throw conflict('That vehicle is not in service', 'vehicle_unavailable');
-      if (cur.hours < v.min_hours || cur.hours > v.max_hours) throw badRequest('That vehicle cannot be booked for this duration', 'invalid_duration');
+      assertDuration(s, v, cur.hours, true);
       if (cur.event_type_id && !(await c.query('SELECT 1 FROM vehicle_event_types WHERE vehicle_id=$1 AND event_type_id=$2', [v.id, cur.event_type_id])).rowCount) throw badRequest('That vehicle is not offered for this event', 'event_not_supported');
       if (cur.driver_option === 'with_driver' && !v.chauffeur_available) throw badRequest('That vehicle is not offered with a driver', 'driver_option_unavailable');
       if (cur.driver_option === 'self_drive' && !v.self_drive_available) throw badRequest('That vehicle is not offered self-drive', 'driver_option_unavailable');

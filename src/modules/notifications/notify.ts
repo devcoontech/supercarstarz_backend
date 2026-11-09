@@ -20,7 +20,7 @@ export const EMAIL_KINDS = new Set([
  */
 export const OWNER_EMAIL_KINDS = new Set([
   'booking_received', 'booking_confirmed', 'booking_cancellation_requested', 'booking_cancelled',
-  'extension_requested', 'overpaid', 'payment_after_release', 'payment_mismatch',
+  'extension_requested', 'booking_extended', 'overpaid', 'payment_after_release', 'payment_mismatch',
 ]);
 
 /**
@@ -29,7 +29,9 @@ export const OWNER_EMAIL_KINDS = new Set([
  * happens later, in emails.ts, and only after commit.
  */
 export async function notify(
-  c: C, p: { customerId?: string | null; bookingId?: string; kind: string; title: string; body?: string; dedupeKey: string; staffOnly?: boolean; data?: Record<string, unknown> },
+  c: C, p: { customerId?: string | null; bookingId?: string; kind: string; title: string; body?: string; dedupeKey: string; staffOnly?: boolean; data?: Record<string, unknown>;
+    /** Override whether the owner is emailed (default: when the kind is in OWNER_EMAIL_KINDS). */
+    ownerEmail?: boolean },
 ) {
   const r = await c.query(
     `INSERT INTO notifications(customer_id, booking_id, kind, title, body, dedupe_key, staff_only)
@@ -53,7 +55,7 @@ export async function notify(
       [r.rows[0].id, p.customerId, p.bookingId ?? null, p.title, p.body ?? null],
     );
   }
-  if (p.bookingId && OWNER_EMAIL_KINDS.has(p.kind)) {
+  if (p.bookingId && (p.ownerEmail ?? OWNER_EMAIL_KINDS.has(p.kind))) {
     const s = await getSettings(c);
     if ((s['notifications.ownerEmails'] || s['company.supportEmail']).trim()) await queue('owner', null);
   }

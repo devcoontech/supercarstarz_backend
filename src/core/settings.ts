@@ -13,11 +13,13 @@ export const DEFAULT_SETTINGS = {
   'booking.holdMinutes': 30, // how long an unpaid 'awaiting_payment' booking holds the car
   'booking.pendingHoldHours': 48, // how long an unpaid customer request waiting for approval holds the car (0 = until staff act)
   'booking.maxOpenUnpaidOrders': 3, // unpaid customer orders one customer can have open at once (0 = no limit)
-  'booking.cancellationFreeHours': 48, // full refund if cancelled this far ahead
+  'booking.cancellationFreeHours': 24, // full refund if cancelled this far ahead
   'booking.cancellationLateRefundPercent': 0,
   'booking.bufferMinutes': 60, // preparation time kept free before and after every booking (a car's own buffer applies if longer)
   'booking.maxAdvanceDays': 365, // furthest ahead a booking can start
   'booking.allowExtensions': true, // customers can extend upcoming and active bookings when the car is free
+  'booking.allowDailyBookings': true, // customers can book whole days (1 day = 24 hours from the start time) as well as hours
+  'booking.maxDays': 7, // longest day booking, in days
   'booking.maxVehiclesPerOrder': 10,
   'delivery.ratePerMilePence': 435, // default delivery rate per mile from the showroom; staff confirm the final charge per booking
   'delivery.showroomFeePence': 0, // optional fee for collecting from the showroom; 0 means collection is free

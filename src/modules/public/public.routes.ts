@@ -22,9 +22,14 @@ const HOURLY_RATE = `COALESCE(
   (SELECT r.amount_pence FROM pricing_rules r WHERE r.active AND r.kind = 'hourly' AND r.vehicle_id IS NULL AND r.event_type_id IS NULL ORDER BY r.created_at DESC, r.id LIMIT 1),
   v.price_per_hour_pence)`;
 
+/** The car's price per day, when it has a daily rate (its own, else a business-wide one); null = 24 x hourly. */
+const DAILY_RATE = `COALESCE(
+  (SELECT r.amount_pence FROM pricing_rules r WHERE r.active AND r.kind = 'daily' AND r.vehicle_id = v.id AND r.event_type_id IS NULL ORDER BY r.created_at DESC, r.id LIMIT 1),
+  (SELECT r.amount_pence FROM pricing_rules r WHERE r.active AND r.kind = 'daily' AND r.vehicle_id IS NULL AND r.event_type_id IS NULL ORDER BY r.created_at DESC, r.id LIMIT 1))`;
+
 const vehicleSelect = `
   v.id, v.make, v.model, v.year, v.category, v.colour, v.transmission, v.seats, v.power, v.top_speed, v.city, v.area,
-  v.description, v.amenities, v.specs, ${HOURLY_RATE} AS price_per_hour_pence, v.delivery_available, v.delivery_fee_pence, v.delivery_radius_miles, v.delivery_pricing, v.delivery_per_mile_pence, v.delivery_free_miles, v.delivery_min_pence, v.delivery_round_trip, v.chauffeur_charge_type,
+  v.description, v.amenities, v.specs, ${HOURLY_RATE} AS price_per_hour_pence, ${DAILY_RATE} AS price_per_day_pence, v.delivery_available, v.delivery_fee_pence, v.delivery_radius_miles, v.delivery_pricing, v.delivery_per_mile_pence, v.delivery_free_miles, v.delivery_min_pence, v.delivery_round_trip, v.chauffeur_charge_type,
   v.stationary_available, v.min_hours, v.max_hours, v.chauffeur_available, v.chauffeur_fee_pence, v.self_drive_available, v.deposit_pence,
   COALESCE((SELECT json_agg(json_build_object('id', i.id, 'url', i.url, 'isCover', i.is_cover) ORDER BY i.is_cover DESC, i.sort_order, i.created_at)
             FROM vehicle_images i WHERE i.vehicle_id = v.id), '[]') AS images,
@@ -48,7 +53,7 @@ export async function publicRoutes(app: FastifyInstance) {
       q: z.string().max(80).optional(),
       sort: z.enum(['price_asc', 'price_desc', 'newest']).default('newest'),
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-      hours: z.coerce.number().int().min(1).max(24).optional(),
+      hours: z.coerce.number().int().min(1).max(24 * 60).optional(),
       limit: z.coerce.number().int().min(1).max(100).default(50), offset: z.coerce.number().int().min(0).default(0),
     }).parse(req.query);
 
@@ -74,7 +79,7 @@ export async function publicRoutes(app: FastifyInstance) {
       const slot = buildSlot(s, 0, q.date, q.time, q.hours, { skipHours: true, skipLead: true });
       p.push(slot.start.toJSDate(), slot.end.toJSDate(), s['booking.bufferMinutes']);
       const a = p.length - 2, b = p.length - 1, buf = `make_interval(mins => GREATEST($${p.length}::int, v.buffer_minutes))`;
-      where.push(`v.min_hours <= ${q.hours} AND v.max_hours >= ${q.hours}`);
+      if (q.hours < 24) where.push(`v.min_hours <= ${q.hours} AND v.max_hours >= ${q.hours}`);
       // Same rule as booking creation: clear of other bookings and of the preparation buffer around them.
       const held = `tstzrange($${a}::timestamptz, $${b}::timestamptz + ${buf}, '[)')`;
       const around = `tstzrange($${a}::timestamptz - ${buf}, $${b}::timestamptz + ${buf}, '[)')`;
@@ -94,7 +99,7 @@ export async function publicRoutes(app: FastifyInstance) {
     const v = (await pool.query(`SELECT ${vehicleSelect} FROM vehicles v WHERE v.id=$1 AND ${publicWhere}`, [id])).rows[0];
     if (!v) throw notFound('Vehicle not found');
     const rules = (await pool.query(
-      `SELECT kind, label, hours, amount_pence, min_amount_pence, event_type_id FROM pricing_rules WHERE active AND kind IN ('hourly','package','extra_hour','per_mile') AND (vehicle_id=$1 OR vehicle_id IS NULL)`, [id],
+      `SELECT kind, label, hours, amount_pence, min_amount_pence, event_type_id FROM pricing_rules WHERE active AND kind IN ('hourly','package','extra_hour','per_mile','daily') AND (vehicle_id=$1 OR vehicle_id IS NULL)`, [id],
     )).rows;
     const s = await getSettings();
     return { ...v, pricing: { rules, serviceFeeBp: s['pricing.serviceFeeBp'], paymentMode: s['payment.mode'], cancellationFreeHours: s['booking.cancellationFreeHours'] } };
@@ -104,17 +109,19 @@ export async function publicRoutes(app: FastifyInstance) {
    * Free start times for each day in a range (default 1 day), with the longest booking from each. Uses the same rules
    * as booking creation: today onward in the business timezone, notice period, and the preparation buffer around
    * other bookings. Days before today are returned empty, never as bookable.
+   * With `hours` of 24 or more (a day booking), only start times where the car is free for that whole time are listed.
    */
   app.get('/vehicles/:id/availability', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const q = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), days: z.coerce.number().int().min(1).max(60).default(1) }).parse(req.query);
+    const q = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), days: z.coerce.number().int().min(1).max(60).default(1), hours: z.coerce.number().int().min(24).max(24 * 60).optional() }).parse(req.query);
     const v = (await pool.query(`SELECT id, min_hours, max_hours, buffer_minutes FROM vehicles v WHERE v.id=$1 AND ${publicWhere}`, [id])).rows[0];
     if (!v) throw notFound('Vehicle not found');
     const s = await getSettings();
     const tz = s['booking.timezone'];
     const buf = Math.max(s['booking.bufferMinutes'], v.buffer_minutes);
     const first = DateTime.fromISO(q.date, { zone: tz }).startOf('day');
-    const range = rangeParam(first.minus({ days: 1 }), first.plus({ days: q.days + 1 }));
+    const span = Math.ceil((q.hours ?? 0) / 24);
+    const range = rangeParam(first.minus({ days: 1 }), first.plus({ days: q.days + 1 + span }));
     const bookings = (await pool.query(
       `SELECT lower(blocked_during) AS hs, upper(blocked_during) AS he, start_at AS s, end_at AS e FROM bookings
         WHERE vehicle_id=$1 AND status IN ${ACTIVE} AND tstzrange(start_at - interval '1 day', upper(blocked_during) + interval '1 day') && $2::tstzrange`, [id, range],
@@ -131,6 +138,14 @@ export async function publicRoutes(app: FastifyInstance) {
       for (let h = s['booking.openHour']; h < s['booking.closeHour']; h++) {
         const start = dayStart.set({ hour: h }).toUTC();
         if (start < earliest) continue;
+        if (q.hours) {
+          // Day booking: the car must be free for the whole stay.
+          const st = start.toMillis(), en = start.plus({ hours: q.hours }).toMillis();
+          const held = (x: Date, y: Date) => overlaps(st, en + buf * 60_000, x, y);
+          const clash = bookings.some((b) => held(b.hs, b.he) || overlaps(st - buf * 60_000, en + buf * 60_000, b.s, b.e)) || blocks.some((k) => held(k.s, k.e));
+          if (!clash) slots.push({ time: String(h).padStart(2, '0') + ':00', maxHours: q.hours });
+          continue;
+        }
         let max = 0;
         for (let n = 1; n <= v.max_hours && h + n <= s['booking.closeHour']; n++) {
           const st = start.toMillis();
@@ -157,6 +172,7 @@ export async function publicRoutes(app: FastifyInstance) {
         requireApproval: s['booking.requireApproval'], holdMinutes: s['booking.holdMinutes'],
         cancellationFreeHours: s['booking.cancellationFreeHours'], cancellationLateRefundPercent: s['booking.cancellationLateRefundPercent'],
         bufferMinutes: s['booking.bufferMinutes'], maxAdvanceDays: s['booking.maxAdvanceDays'],
+        allowDailyBookings: s['booking.allowDailyBookings'], maxDays: s['booking.maxDays'],
         today: DateTime.now().setZone(s['booking.timezone']).toISODate(),
       },
       delivery: { ratePerMilePence: s['delivery.ratePerMilePence'], showroomFeePence: s['delivery.showroomFeePence'] },

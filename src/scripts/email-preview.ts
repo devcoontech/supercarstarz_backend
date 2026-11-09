@@ -62,6 +62,7 @@ const samples: [string, string, 'customer' | 'owner', EmailCtx][] = [
   ['owner-cancellation-requested', 'booking_cancellation_requested', 'owner', ctx()],
   ['owner-booking-cancelled', 'booking_cancelled', 'owner', ctx()],
   ['owner-extension-requested', 'extension_requested', 'owner', ctx({ payload: { title: 'Extension requested for SCS-1042', body: '1 extra hour requested' } })],
+  ['owner-booking-extended', 'booking_extended', 'owner', ctx({ payload: { title: 'Booking extended', body: 'SCS-1042 now ends at 16:00.' } })],
   ['owner-overpaid', 'overpaid', 'owner', ctx({ paid: 60000, payload: { title: 'Booking SCS-1042 is overpaid by £46.65', body: 'Refund the difference.' } })],
 ];
 
