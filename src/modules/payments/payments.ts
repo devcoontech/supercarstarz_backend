@@ -251,7 +251,7 @@ export async function refundPayment(
         `INSERT INTO refunds(payment_id, booking_id, order_id, amount_pence, reason, status, provider_ref, recorded_by) VALUES ($1,$2,$8,$3,$4,$5,$6,$7) RETURNING *`,
         [p.id, p.booking_id, amountPence, reason, status, sr.id, staffId, p.order_id])).rows[0];
       await logEvent(c, p.booking_id, actor, 'refund_recorded', { reason, meta: { refundId: r.id, amountPence, status } });
-      await notify(c, { customerId: p.customer_id, bookingId: p.booking_id, kind: 'refund', title: 'Refund issued', dedupeKey: `refund:${r.id}`, data: { amountPence } });
+      await notify(c, { customerId: p.customer_id, bookingId: p.booking_id, kind: 'refund', title: 'Refund issued', dedupeKey: `refund:${r.id}`, data: { amountPence, refundId: r.id } });
       await applyPaymentState(c, p.booking_id, actor);
       if (status === 'succeeded') await issueRefundReceipt(c, r.id);
       return r;
@@ -261,7 +261,7 @@ export async function refundPayment(
       `INSERT INTO refunds(payment_id, booking_id, order_id, amount_pence, reason, status, recorded_by) VALUES ($1,$2,$6,$3,$4,'succeeded',$5) RETURNING *`,
       [p.id, p.booking_id, amountPence, reason, staffId, p.order_id])).rows[0];
     await logEvent(c, p.booking_id, actor, 'refund_recorded', { reason, meta: { refundId: r.id, amountPence, manual: true } });
-    await notify(c, { customerId: p.customer_id, bookingId: p.booking_id, kind: 'refund', title: 'Refund issued', dedupeKey: `refund:${r.id}`, data: { amountPence } });
+    await notify(c, { customerId: p.customer_id, bookingId: p.booking_id, kind: 'refund', title: 'Refund issued', dedupeKey: `refund:${r.id}`, data: { amountPence, refundId: r.id } });
     await applyPaymentState(c, p.booking_id, actor);
     await issueRefundReceipt(c, r.id);
     return r;

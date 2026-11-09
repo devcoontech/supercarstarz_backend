@@ -33,7 +33,7 @@ const ctx = (over: Partial<{ paid: number; refunded: number; payload: Record<str
     first: 'Sarah', customer: { name: 'Sarah Thompson', email: 'sarah@example.com', phone: '07700 900456' },
     booking: { ref: 'SCS-1042', item_ref: 'SCS-1042', start_at: start, end_at: end, hours: 2, experience: 'delivered', address: item.address, pickup_address: null, dropoff_address: null,
       status: 'confirmed', driver_option: 'with_driver', total_pence: total, paid_pence: paid, refunded_pence: refunded, deposit_due_pence: 16600, vehicle: 'Lamborghini Huracán', event: 'Birthday party' },
-    order: { id: 'o1', ref: 'SCS-1042', source: 'customer_app', created_at: at(-3, 18), subtotal_pence: 52700, discount_pence: 0, tax_pence: 0, fee_pence: 2635, tax_label: 'VAT',
+    order: { id: 'o1', ref: 'SCS-1042', source: 'customer_app', created_at: at(-3, 18), subtotal_pence: 52700, discount_pence: 0, tax_pence: 0, fee_pence: 0, tax_label: 'VAT',
       payment_status: paid >= total ? 'paid' : paid ? 'deposit_paid' : 'unpaid', pricing_snapshot: {}, total_pence: total, paid_pence: paid, refunded_pence: refunded, deposit_due_pence: 16600 },
     items: [item], charges: [], settings, payload: over.payload ?? {}, receipt: over.receipt ?? null,
   };

@@ -1,3 +1,4 @@
+import { pdfFileName, renderDocumentPdf } from '../finance/pdf.js';
 import { DateTime } from 'luxon';
 import { pool } from '../../core/db.js';
 import { getSettings, type Settings } from '../../core/settings.js';
@@ -567,10 +568,13 @@ export async function processOutbox(limit = 10): Promise<OutboxResult> {
       const to = recipient === 'owner'
         ? ownerRecipients(settings).join(', ')
         : (await pool.query('SELECT email FROM customers WHERE id=$1', [r.customer_id])).rows[0]?.email;
-      // A payment email carries its receipt (issued in the same transaction as the payment).
-      const receipt: Receipt | null = recipient === 'customer' && r.kind === 'payment_received' && r.payload?.paymentId
-        ? (await pool.query('SELECT number, kind, issued_at, amount_pence, data FROM invoices WHERE payment_id=$1', [r.payload.paymentId])).rows[0] ?? null
-        : null;
+      // Payment and refund emails carry their receipt (issued in the same transaction as the payment or refund).
+      const receipt: Receipt | null = recipient !== 'customer' ? null
+        : r.kind === 'payment_received' && r.payload?.paymentId
+          ? (await pool.query('SELECT number, kind, issued_at, amount_pence, data FROM invoices WHERE payment_id=$1', [r.payload.paymentId])).rows[0] ?? null
+          : r.kind === 'refund' && r.payload?.refundId
+            ? (await pool.query('SELECT number, kind, issued_at, amount_pence, data FROM invoices WHERE refund_id=$1', [r.payload.refundId])).rows[0] ?? null
+            : null;
       const x = r.booking_id ? await loadContext(r.booking_id, settings, r.payload ?? {}, receipt) : null;
       const t = x ? buildBookingEmail(r.kind, recipient, x) : null;
       // Bookings staff make in the dashboard don't need a "new booking" alert to the same staff.
@@ -586,7 +590,7 @@ export async function processOutbox(limit = 10): Promise<OutboxResult> {
       }
       const mail: Mail = {
         to, subject: t.subject, text: t.text, html: t.html, inline: t.inline,
-        attachments: receipt ? [{ filename: `${receipt.number}.html`, content: renderDocument(receipt), contentType: 'text/html; charset=utf-8' }] : undefined,
+        attachments: receipt ? [{ filename: pdfFileName(receipt), content: await renderDocumentPdf(receipt), contentType: 'application/pdf' }] : undefined,
       };
       const res = await getMailer().send(mail);
       if (res.sent) {

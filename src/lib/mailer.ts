@@ -2,7 +2,7 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../core/config.js';
 import { getSecret, getSettings } from '../core/settings.js';
 
-export type Attachment = { filename: string; content: string; contentType: string };
+export type Attachment = { filename: string; content: string | Buffer; contentType: string };
 /** An image shown inside the HTML body (referenced as <img src="cid:...">), not offered as a download. */
 export type InlineImage = { cid: string; filename: string; content: Buffer; contentType: string };
 /** `text` is always sent (plain-text clients, previews, tests); `html` is the branded version when there is one. */

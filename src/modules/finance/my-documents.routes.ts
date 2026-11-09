@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { pool } from '../../core/db.js';
 import { notFound } from '../../core/errors.js';
 import { invoicesFor, renderDocument, renderStatement } from './documents.js';
+import { pdfFileName, renderDocumentPdf } from './pdf.js';
 
 export function myDocumentRoutes(app: FastifyInstance) {
   // A customer only ever sees their own receipts; anything else is "not found".
@@ -13,6 +14,15 @@ export function myDocumentRoutes(app: FastifyInstance) {
     const doc = (await pool.query('SELECT * FROM invoices WHERE id=$1 AND customer_id=$2', [id, req.user.sub])).rows[0];
     if (!doc) throw notFound('Document not found');
     return reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').send(renderDocument(doc));
+  });
+
+  /** The receipt as a PDF file, for the app's download button. */
+  app.get('/invoices/:id/pdf', async (req, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const doc = (await pool.query('SELECT * FROM invoices WHERE id=$1 AND customer_id=$2', [id, req.user.sub])).rows[0];
+    if (!doc) throw notFound('Document not found');
+    return reply.type('application/pdf').header('cache-control', 'no-store')
+      .header('content-disposition', `attachment; filename="${pdfFileName(doc)}"`).send(await renderDocumentPdf(doc));
   });
 
   app.get('/bookings/:id/statement', async (req, reply) => {

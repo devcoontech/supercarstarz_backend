@@ -111,9 +111,9 @@ describe('booking emails', () => {
     // The receipt issued for the payment is attached, and named in the subject.
     const receipt = (await pool.query('SELECT number FROM invoices WHERE payment_id IS NOT NULL')).rows[0];
     expect(pay.subject).toContain(receipt.number);
-    expect(pay.attachments).toEqual([expect.objectContaining({ filename: `${receipt.number}.html`, contentType: expect.stringContaining('text/html') })]);
-    expect(pay.attachments![0].content).toContain(receipt.number);
-    expect(pay.attachments![0].content).toContain('£420.00');
+    expect(pay.attachments).toEqual([expect.objectContaining({ filename: `${receipt.number}.pdf`, contentType: 'application/pdf' })]);
+    expect(Buffer.isBuffer(pay.attachments![0].content)).toBe(true);
+    expect((pay.attachments![0].content as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
   });
 
   it('emails when a booking is approved for payment, with the exact amount due, and again only for a genuine new approval', async () => {
@@ -871,7 +871,7 @@ describe('branded emails, owner emails and reminders', () => {
     const receipt = (await pool.query(`SELECT number FROM invoices WHERE kind='full_payment_receipt'`)).rows[0];
     expect(full.subject).toContain(receipt.number);
     expect(full.text).toContain('Nothing further to pay');
-    expect(full.attachments).toEqual([expect.objectContaining({ filename: `${receipt.number}.html` })]);
-    expect(full.attachments![0].content).toContain('data:image/jpeg;base64,'); // the receipt carries the logo too
+    expect(full.attachments).toEqual([expect.objectContaining({ filename: `${receipt.number}.pdf`, contentType: 'application/pdf' })]);
+    expect((full.attachments![0].content as Buffer).length).toBeGreaterThan(1000); // a real PDF, with the logo
   });
 });

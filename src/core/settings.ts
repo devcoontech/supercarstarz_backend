@@ -23,7 +23,7 @@ export const DEFAULT_SETTINGS = {
   'booking.maxVehiclesPerOrder': 10,
   'delivery.ratePerMilePence': 435, // default delivery rate per mile from the showroom; staff confirm the final charge per booking
   'delivery.showroomFeePence': 0, // optional fee for collecting from the showroom; 0 means collection is free
-  'pricing.serviceFeeBp': 500, // 5% customer service fee
+  'pricing.serviceFeeBp': 0, // no service fee is charged (kept at 0; the setting is no longer shown in the dashboard)
   'tax.enabled': false, // add tax to bookings (off = prices already include any tax, or not registered)
   'tax.rateBp': 2000, // basis points: 2000 = 20%
   'tax.policy': 'after_discount', // 'after_discount' (tax the discounted amount) | 'before_discount' (tax the full rental subtotal)
