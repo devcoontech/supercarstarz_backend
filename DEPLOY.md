@@ -274,6 +274,35 @@ Test a booking with Stripe's test card `4242 4242 4242 4242`, then confirm the b
 
 Then use the store build commands under **Release to the stores** at the end of this guide.
 
+### Part 11: Set up push notifications
+
+Pushes go through Expo's push service, which passes them to Google (Android) and Apple (iOS). Each needs its credentials once. The backend needs no new settings.
+
+**Android:**
+
+1. In the [Firebase console](https://console.firebase.google.com), create a project and add an Android app with the package name `com.supercarstars.app`.
+2. Download `google-services.json` into `mobile/`, add `"googleServicesFile": "./google-services.json"` under `expo.android` in `mobile/app.json`, and commit both.
+3. In Firebase, open **Project settings > Service accounts > Generate new private key**. **Keep this file secret and out of git.**
+4. Upload the key to Expo, choosing **Android > Google Service Account > Manage your Google Service Account Key for Push Notifications (FCM V1)**:
+
+```bash
+eas credentials --platform android
+```
+
+**iOS** needs a paid Apple Developer account. The first iOS build offers to create the push key, so answer yes. To set it up separately, choose **Push Notifications** here:
+
+```bash
+eas credentials --platform ios
+```
+
+Then make new builds of the app, because this adds native code. Pushes can't be tested in Expo Go on Android, and iOS is best tested on a real iPhone.
+
+**To check delivery**, run this on the server. `sent` means Expo accepted the push. A `last_error` such as `InvalidCredentials` appears about 15 minutes later if Google or Apple refused it:
+
+```bash
+docker exec "$DB" psql -U postgres -d postgres -c "select created_at, title, status, attempts, last_error from push_outbox order by created_at desc limit 15"
+```
+
 ### Deploying updates
 
 Push to `main` in the `backend` or `dashboard` repo, and Coolify builds and deploys that app. Migrations run automatically. If the new version fails to start or fails its health check, Coolify can keep the old one running. `mobile` updates need a new EAS build.
@@ -289,6 +318,7 @@ Push to `main` in the `backend` or `dashboard` repo, and Coolify builds and depl
 | Dashboard shows a network or CORS error | Check `CORS_ORIGINS`. If `VITE_API_URL` changed, redeploy the dashboard |
 | Stripe or email secrets fail | `SETTINGS_ENCRYPTION_KEY` doesn't match your local value |
 | Images disappear after a deploy | The Persistent Storage mounts are missing |
+| No push notifications arrive | Check that notifications are allowed on the phone, then see the delivery check in Part 11. No rows means the phone never registered, which on Android usually means Firebase isn't set up |
 
 ## Deploying with plain Docker Compose
 

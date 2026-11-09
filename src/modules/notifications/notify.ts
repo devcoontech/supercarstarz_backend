@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import { getSettings } from '../../core/settings.js';
 
-/** In-app notifications, and the emails queued with them. */
+/** In-app notifications, and the emails and pushes queued with them. */
 
 type C = pg.PoolClient;
 
@@ -44,6 +44,15 @@ export async function notify(
     [r.rows[0].id, customerId, p.bookingId ?? null, p.kind, payload, recipient],
   );
   if (p.customerId && !p.staffOnly && EMAIL_KINDS.has(p.kind)) await queue('customer', p.customerId);
+  // Every notification the customer can see in the app also goes to their phones, if they have the app signed in.
+  if (p.customerId && !p.staffOnly) {
+    await c.query(
+      `INSERT INTO push_outbox(notification_id, customer_id, booking_id, title, body)
+       SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text WHERE EXISTS (SELECT 1 FROM push_tokens WHERE customer_id=$2::uuid)
+       ON CONFLICT (notification_id) DO NOTHING`,
+      [r.rows[0].id, p.customerId, p.bookingId ?? null, p.title, p.body ?? null],
+    );
+  }
   if (p.bookingId && OWNER_EMAIL_KINDS.has(p.kind)) {
     const s = await getSettings(c);
     if ((s['notifications.ownerEmails'] || s['company.supportEmail']).trim()) await queue('owner', null);

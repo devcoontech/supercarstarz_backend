@@ -102,6 +102,8 @@ export async function authRoutes(app: FastifyInstance) {
       const used = await q.query('UPDATE password_resets SET used_at = now() WHERE id=$1 AND used_at IS NULL RETURNING id', [r.id]);
       if (!used.rowCount) throw bad(); // someone else just used it
       await q.query('UPDATE customers SET password_hash=$2, password_changed_at=now(), updated_at=now() WHERE id=$1', [c.id, hash]);
+      // Older sessions are signed out, so their phones must stop showing this customer's booking updates too.
+      await q.query('DELETE FROM push_tokens WHERE customer_id=$1', [c.id]);
       return { ok: true };
     });
   });

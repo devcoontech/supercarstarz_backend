@@ -49,6 +49,8 @@ export const config = {
   },
   smtpUrl: process.env.SMTP_URL || '',
   mailFrom: process.env.MAIL_FROM || 'Supercarstars <no-reply@localhost>',
+  /** Optional. Only needed if "Enhanced security for push notifications" is turned on in the Expo account. */
+  expoAccessToken: process.env.EXPO_ACCESS_TOKEN || '',
   stripeSecretFallback: process.env.STRIPE_SECRET_KEY || '',
   stripeWebhookFallback: process.env.STRIPE_WEBHOOK_SECRET || '',
   /** Protects /internal/run-jobs. Unset: the route doesn't exist. */
