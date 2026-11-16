@@ -101,10 +101,10 @@ describe('driver and collection options', () => {
     const c = await makeCustomer(app);
     const q = (await post('/api/public/quote', {}, bookingPayload(v.id, { experience: 'delivered', address: '1 Party Lane, London' }))).json();
     expect(q.pricing.deliveryEstimate).toMatchObject({ amountPence: null });
-    expect(q.pricing.totalPence).toBe(42000);
+    expect(q.pricing.totalPence).toBe(40000);
     const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id, { experience: 'delivered', address: '1 Party Lane, London' }))).json();
-    expect(bk).toMatchObject({ collectionMethod: 'delivery', address: '1 Party Lane, London', totalPence: 42000 });
-    expect(bk.finance).toMatchObject({ delivery: { status: 'pending', amountPence: 0 }, finalTotalPence: 42000, balanceDuePence: 42000 });
+    expect(bk).toMatchObject({ collectionMethod: 'delivery', address: '1 Party Lane, London', totalPence: 40000 });
+    expect(bk.finance).toMatchObject({ delivery: { status: 'pending', amountPence: 0 }, finalTotalPence: 40000, balanceDuePence: 40000 });
     const showroom = (await post('/api/me/bookings', c.h, bookingPayload(v.id, { date: day(11) }))).json();
     expect(showroom.finance.delivery).toBeNull();
     expect((await pool.query(`SELECT count(*)::int n FROM booking_charges WHERE booking_id=$1`, [showroom.id])).rows[0].n).toBe(0);
@@ -215,7 +215,7 @@ describe('add-on management', () => {
     expect((await post('/api/me/bookings', c.h, bookingPayload(v.id, { addons: [{ id: a.id, quantity: 3 }] }))).json().error.code).toBe('invalid_addon_quantity');
     const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id, { addons: [{ id: a.id, quantity: 2 }] }))).json();
     expect(bk.pricing.lines.find((l: any) => l.key === `addon:${a.id}`)).toMatchObject({ amountPence: 10000, label: 'Photographer × 2' });
-    expect(bk.totalPence).toBe(Math.round((40000 + 10000) * 1.05));
+    expect(bk.totalPence).toBe(40000 + 10000);
     await app.inject({ method: 'PATCH', url: `/api/admin/addons/${a.id}`, headers: staff.h, payload: { pricePence: 9999 } });
     const detail = (await get(`/api/me/bookings/${bk.id}`, c.h)).json();
     expect(detail.addons).toEqual([expect.objectContaining({ name: 'Photographer', unitPricePence: 5000, quantity: 2, totalPence: 10000 })]);
@@ -228,24 +228,24 @@ describe('manual payments', () => {
     const v = await makeVehicle();
     const c = await makeCustomer(app);
     const staff = await makeStaff(app);
-    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json(); // 42000
+    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json(); // 40000
     const paidAt = new Date(Date.now() - 3600_000).toISOString();
     const r = await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 20000, method: 'cash', reference: 'Till 4', paidAt, note: 'Paid at the counter' });
     expect(r.statusCode, r.body).toBe(201);
     const d = (await get(`/api/admin/bookings/${bk.id}`, staff.h)).json();
-    expect(d.finance).toMatchObject({ paidPence: 20000, balanceDuePence: 22000, finalTotalPence: 42000 });
+    expect(d.finance).toMatchObject({ paidPence: 20000, balanceDuePence: 20000, finalTotalPence: 40000 });
     expect(d.payments[0]).toMatchObject({ method: 'cash', source: 'manual', verified: false, recordedBy: 'Test Owner', manualReference: 'Till 4', note: 'Paid at the counter' });
     expect(new Date(d.payments[0].paidAt).toISOString()).toBe(paidAt);
     expect(d.events.map((e: any) => e.action)).toContain('manual_payment_recorded');
     const [rcpt] = await docs(bk.id);
-    expect(rcpt).toMatchObject({ kind: 'payment_receipt', amount_pence: 20000, booking_total_pence: 42000, paid_to_date_pence: 20000, balance_pence: 22000 });
+    expect(rcpt).toMatchObject({ kind: 'payment_receipt', amount_pence: 20000, booking_total_pence: 40000, paid_to_date_pence: 20000, balance_pence: 20000 });
     const html = (await get(`/api/admin/invoices/${rcpt.id}/document`, staff.h)).body;
     expect(html).toContain('Cash (recorded by staff)');
     expect(html).toContain('It is not a receipt for the full booking');
     expect(html).not.toContain('Paid at the counter'); // staff notes stay internal
     // The customer sees the money but not the staff note.
     const mine = (await get(`/api/me/bookings/${bk.id}`, c.h)).json();
-    expect(mine.finance.balanceDuePence).toBe(22000);
+    expect(mine.finance.balanceDuePence).toBe(20000);
     expect(JSON.stringify(mine)).not.toContain('Paid at the counter');
   });
 
@@ -254,7 +254,7 @@ describe('manual payments', () => {
     const c = await makeCustomer(app);
     const staff = await makeStaff(app);
     const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json();
-    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 42000, method: 'card_terminal' });
+    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 40000, method: 'card_terminal' });
     const [p] = (await get(`/api/admin/bookings/${bk.id}`, staff.h)).json().payments;
     expect(p).toMatchObject({ source: 'manual', verified: false });
     const [rcpt] = await docs(bk.id);
@@ -268,11 +268,11 @@ describe('manual payments', () => {
     const v = await makeVehicle();
     const c = await makeCustomer(app);
     const staff = await makeStaff(app);
-    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id, { experience: 'delivered', address: '1 Party Lane' }))).json(); // 42000, deposit = full
+    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id, { experience: 'delivered', address: '1 Party Lane' }))).json(); // 40000, deposit = full
     await post(`/api/admin/bookings/${bk.id}/delivery-charge`, staff.h, { distanceMiles: 20, ratePerMilePence: 270, finalPence: 5400 });
     await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 20000, method: 'cash' });
     expect((await docs(bk.id)).map((d) => d.kind)).toEqual(['adjustment_note', 'payment_receipt']);
-    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 22000, method: 'cash' }); // the quoted price is now paid
+    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 20000, method: 'cash' }); // the quoted price is now paid
     expect((await get(`/api/admin/bookings/${bk.id}`, staff.h)).json()).toMatchObject({ paymentStatus: 'partially_paid', finance: { balanceDuePence: 5400, depositMode: false } });
   });
 
@@ -419,7 +419,7 @@ describe('receipts, refunds and reconciliation', () => {
     const b = await makeCustomer(app, 'b@test.com');
     const staff = await makeStaff(app);
     const bk = (await post('/api/me/bookings', a.h, bookingPayload(v.id))).json();
-    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 42000, method: 'cash' });
+    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 40000, method: 'cash' });
     const [rcpt] = (await get('/api/me/invoices', a.h)).json().items;
     expect(rcpt.kind).toBe('full_payment_receipt');
     const own = await get(`/api/me/invoices/${rcpt.id}/document`, a.h);
@@ -438,15 +438,15 @@ describe('receipts, refunds and reconciliation', () => {
     const c = await makeCustomer(app);
     const staff = await makeStaff(app);
     const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json();
-    await openIntent(bk.id, c.id, 42000, 'pi_fail');
+    await openIntent(bk.id, c.id, 40000, 'pi_fail');
     await hook({ id: 'evt_f', object: 'event', type: 'payment_intent.payment_failed', data: { object: { id: 'pi_fail', object: 'payment_intent', last_payment_error: { message: 'declined' } } } });
     expect((await get(`/api/me/bookings/${bk.id}`, c.h)).json()).toMatchObject({ paymentStatus: 'payment_failed', paidPence: 0 });
-    const pay = (await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 42000, method: 'cash' })).json();
+    const pay = (await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 40000, method: 'cash' })).json();
     await post(`/api/admin/payments/${pay.id}/refund`, staff.h, { amountPence: 5000, reason: 'Goodwill' });
     const d = (await get(`/api/admin/bookings/${bk.id}`, staff.h)).json();
     expect(d.paymentStatus).toBe('partially_refunded');
-    expect(d.finance).toMatchObject({ paidPence: 42000, refundedPence: 5000, netPaidPence: 37000, balanceDuePence: 5000 });
-    expect((await docs(bk.id)).map((x) => [x.kind, x.amount_pence])).toEqual([['full_payment_receipt', 42000], ['refund_receipt', -5000]]);
+    expect(d.finance).toMatchObject({ paidPence: 40000, refundedPence: 5000, netPaidPence: 35000, balanceDuePence: 5000 });
+    expect((await docs(bk.id)).map((x) => [x.kind, x.amount_pence])).toEqual([['full_payment_receipt', 40000], ['refund_receipt', -5000]]);
   });
 
   it('cancelling keeps every financial record and releases the car', async () => {

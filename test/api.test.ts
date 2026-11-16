@@ -106,7 +106,7 @@ describe('booking emails', () => {
     const kinds = (await outbox()).map((r) => r.kind).sort();
     expect(kinds).toEqual(['booking_confirmed', 'booking_received', 'payment_received']);
     const pay = sent.find((m) => m.subject.startsWith('Payment verified'))!;
-    expect(pay.text).toContain('£420.00'); // 2h x 200 + 5% fee
+    expect(pay.text).toContain('£400.00'); // 2h x 200, no service fee
     expect(pay.text).toContain('Nothing further to pay');
     // The receipt issued for the payment is attached, and named in the subject.
     const receipt = (await pool.query('SELECT number FROM invoices WHERE payment_id IS NOT NULL')).rows[0];
@@ -121,12 +121,12 @@ describe('booking emails', () => {
     const v = await makeVehicle();
     const c = await makeCustomer(app, 'approve@test.com');
     const staff = await makeStaff(app);
-    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json(); // total 420.00
+    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json(); // total 400.00
     await post(`/api/admin/bookings/${bk.id}/status`, staff.h, { to: 'awaiting_payment' });
     await processOutbox(50);
     const mail = sent.find((m) => m.subject.includes('payment needed'))!;
     expect(mail.subject).toContain(bk.ref);
-    expect(mail.text).toContain('pay £420.00');
+    expect(mail.text).toContain('pay £400.00');
     expect(mail.text).toContain('30 minutes');
     await processOutbox(50);
     expect(sent.filter((m) => m.subject.includes('payment needed'))).toHaveLength(1);
@@ -137,7 +137,7 @@ describe('booking emails', () => {
     const c = await makeCustomer(app, 'refund@test.com');
     const staff = await makeStaff(app);
     const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json();
-    const pay = (await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 42000, method: 'bank_transfer' })).json();
+    const pay = (await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 40000, method: 'bank_transfer' })).json();
     const r = await post(`/api/admin/payments/${pay.id}/refund`, staff.h, { amountPence: 5000, reason: 'INTERNAL goodwill note' });
     expect(r.statusCode).toBe(201);
     await processOutbox(50);
@@ -352,7 +352,7 @@ describe('booking creation and availability', () => {
     const c = await makeCustomer(app);
     const r = await post('/api/me/bookings', c.h, bookingPayload(v.id));
     expect(r.statusCode).toBe(201);
-    expect(r.json()).toMatchObject({ status: 'pending', totalPence: 42000, hours: 2 });
+    expect(r.json()).toMatchObject({ status: 'pending', totalPence: 40000, hours: 2 });
     expect(r.json().pricing.lines[0].amountPence).toBe(40000);
   });
 
@@ -493,8 +493,8 @@ describe('events and offers', () => {
     await post('/api/admin/pricing-rules', staff.h, { vehicleId: v.id, kind: 'hourly', amountPence: 99900 });
     await app.inject({ method: 'PATCH', url: `/api/admin/vehicles/${v.id}`, headers: staff.h, payload: { pricePerHourPence: 77700 } });
     const after = (await app.inject({ method: 'GET', url: `/api/me/bookings/${bk.id}`, headers: c.h })).json();
-    expect(after.totalPence).toBe(42000);
-    expect(after.pricing.totalPence).toBe(42000);
+    expect(after.totalPence).toBe(40000);
+    expect(after.pricing.totalPence).toBe(40000);
     const newQuote = (await post('/api/public/quote', {}, bookingPayload(v.id, { time: '15:00' }))).json();
     expect(newQuote.pricing.subtotalPence).toBe(99900 * 2);
   });
@@ -696,22 +696,22 @@ describe('payments', () => {
     const v = await makeVehicle();
     const c = await makeCustomer(app);
     const staff = await makeStaff(app);
-    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json(); // total 42000
+    const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json(); // total 40000
     const m1 = await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 20000, method: 'cash', reference: 'receipt 1' });
     expect(m1.statusCode).toBe(201);
     expect((await pool.query('SELECT payment_status, status FROM bookings WHERE id=$1', [bk.id])).rows[0]).toMatchObject({ payment_status: 'partially_paid', status: 'pending' });
     expect((await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 30000, method: 'cash' })).json().error.code).toBe('overpayment');
-    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 22000, method: 'bank_transfer' });
-    expect((await pool.query('SELECT payment_status, paid_pence FROM bookings WHERE id=$1', [bk.id])).rows[0]).toMatchObject({ payment_status: 'paid', paid_pence: 42000 });
+    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 20000, method: 'bank_transfer' });
+    expect((await pool.query('SELECT payment_status, paid_pence FROM bookings WHERE id=$1', [bk.id])).rows[0]).toMatchObject({ payment_status: 'paid', paid_pence: 40000 });
 
     const first = m1.json();
     expect((await post(`/api/admin/payments/${first.id}/refund`, staff.h, { amountPence: 25000, reason: 'x' })).statusCode).toBe(400); // more than the payment
     expect((await post(`/api/admin/payments/${first.id}/refund`, staff.h, { amountPence: 5000, reason: 'goodwill' })).statusCode).toBe(201);
     expect((await pool.query('SELECT payment_status, refunded_pence FROM bookings WHERE id=$1', [bk.id])).rows[0]).toMatchObject({ payment_status: 'partially_refunded', refunded_pence: 5000 });
     const dash = (await app.inject({ method: 'GET', url: '/api/admin/dashboard', headers: staff.h })).json();
-    expect(dash.money.collectedPence).toBe(42000);
+    expect(dash.money.collectedPence).toBe(40000);
     expect(dash.money.refundedPence).toBe(5000);
-    expect(dash.money.netCollectedPence).toBe(37000);
+    expect(dash.money.netCollectedPence).toBe(35000);
   });
 });
 
@@ -863,10 +863,10 @@ describe('branded emails, owner emails and reminders', () => {
     const c = await makeCustomer(app, 'invoice@test.com');
     const bk = (await post('/api/me/bookings', c.h, bookingPayload(v.id))).json();
     await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 10000, method: 'bank_transfer' });
-    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 32000, method: 'bank_transfer' });
+    await post(`/api/admin/bookings/${bk.id}/payments/manual`, staff.h, { amountPence: 30000, method: 'bank_transfer' });
     await processOutbox(50);
     const part = sent.find((m) => m.subject.startsWith('Payment verified for'))!;
-    expect(part.text).toContain('Still to pay: £320.00');
+    expect(part.text).toContain('Still to pay: £300.00');
     const full = sent.find((m) => m.subject.includes('paid in full'))!;
     const receipt = (await pool.query(`SELECT number FROM invoices WHERE kind='full_payment_receipt'`)).rows[0];
     expect(full.subject).toContain(receipt.number);
