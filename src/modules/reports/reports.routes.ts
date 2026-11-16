@@ -74,7 +74,13 @@ export function reportsRoutes(app: FastifyInstance) {
         byStatus, pending: byStatus.pending ?? 0, confirmed: (byStatus.confirmed ?? 0) + (byStatus.driver_assigned ?? 0), ongoing: byStatus.in_progress ?? 0,
         completed: byStatus.completed ?? 0, cancelled: (byStatus.cancelled ?? 0) + (byStatus.rejected ?? 0),
       },
-      attention: { driverAssignmentsNeeded: attention.n },
+      attention: {
+        driverAssignmentsNeeded: attention.n,
+        // Self-drive drivers waiting for a licence review, on bookings that are still going ahead.
+        selfDriveChecks: (await pool.query(
+          `SELECT count(*)::int n FROM self_drive_applications s WHERE s.status='pending'
+             AND EXISTS (SELECT 1 FROM bookings b WHERE b.order_id=s.order_id AND b.status NOT IN ('cancelled','rejected','completed','payment_failed') AND b.end_at > now())`)).rows[0].n,
+      },
       upcoming: upcoming.rows,
       perDay,
       utilization: util.map((u) => ({ ...u, percent: Math.min(100, Math.round((u.bookedHours / (days * openHoursPerDay)) * 1000) / 10) })),

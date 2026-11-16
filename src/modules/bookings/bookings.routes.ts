@@ -26,6 +26,7 @@ import { bookingDriverRoutes } from '../drivers/booking-drivers.routes.js';
 import { bookingPaymentRoutes } from '../payments/booking-payments.routes.js';
 import { chargeRoutes } from '../finance/charges.routes.js';
 import { documentRoutes } from '../finance/documents.routes.js';
+import { selfDriveAdminRoutes, selfDriveForStaff } from '../self-drive/self-drive.routes.js';
 
 
 const uuid = z.string().uuid();
@@ -41,6 +42,7 @@ const listSql = `
            'items', (SELECT count(*)::int FROM bookings x WHERE x.order_id=o.id)) AS "order",
          (SELECT count(*)::int FROM booking_extensions x WHERE x.booking_id=b.id AND x.status='confirmed') AS "extensions",
          EXISTS (SELECT 1 FROM booking_extensions x WHERE x.booking_id=b.id AND x.status='requested') AS "extensionRequested",
+         (SELECT s.status FROM self_drive_applications s WHERE s.order_id=o.id) AS "selfDriveStatus",
          json_build_object('id', c.id, 'name', c.name, 'email', c.email, 'phone', c.phone) AS customer,
          json_build_object('id', v.id, 'name', v.make || ' ' || v.model) AS vehicle,
          CASE WHEN e.id IS NULL THEN NULL ELSE json_build_object('id', e.id, 'title', e.title) END AS "eventType",
@@ -60,11 +62,12 @@ export async function adminBookingRoutes(app: FastifyInstance) {
   bookingPaymentRoutes(app);
   chargeRoutes(app);
   documentRoutes(app);
+  selfDriveAdminRoutes(app);
 
   app.get('/bookings', async (req) => {
     const q = z.object({
       q: z.string().max(80).optional(), status: z.enum(statuses).optional(), paymentStatus: z.string().optional(), vehicleId: uuid.optional(),
-      eventTypeId: uuid.optional(), customerId: uuid.optional(), driverId: uuid.optional(), extensionRequests: z.enum(['true']).optional(),
+      eventTypeId: uuid.optional(), customerId: uuid.optional(), driverId: uuid.optional(), extensionRequests: z.enum(['true']).optional(), selfDrive: z.enum(['pending', 'approved', 'rejected']).optional(),
       from: z.string().optional(), to: z.string().optional(),
       sort: z.enum(['start_asc', 'start_desc', 'created_desc']).default('start_desc'),
       limit: z.coerce.number().int().min(1).max(200).default(50), offset: z.coerce.number().int().min(0).default(0),
@@ -77,6 +80,7 @@ export async function adminBookingRoutes(app: FastifyInstance) {
     if (q.status) add('b.status = ?', q.status);
     if (q.paymentStatus) add('o.payment_status = ?', q.paymentStatus);
     if (q.extensionRequests) w.push(`EXISTS (SELECT 1 FROM booking_extensions x WHERE x.booking_id=b.id AND x.status='requested')`);
+    if (q.selfDrive) add(`EXISTS (SELECT 1 FROM self_drive_applications s WHERE s.order_id=b.order_id AND s.status = ?)`, q.selfDrive);
     if (q.vehicleId) add('b.vehicle_id = ?', q.vehicleId);
     if (q.eventTypeId) add('b.event_type_id = ?', q.eventTypeId);
     if (q.customerId) add('b.customer_id = ?', q.customerId);
@@ -126,13 +130,14 @@ export async function adminBookingRoutes(app: FastifyInstance) {
       full.created_by_staff ? pool.query('SELECT name FROM staff_users WHERE id=$1', [full.created_by_staff]).then((r) => r.rows[0]?.name ?? null) : Promise.resolve(null),
       orderOverview(orderId), extensionsFor(pool, id, true),
     ]);
+    const selfDrive = await selfDriveForStaff(orderId, req.user.role!);
     const s = await getSettings();
     const row = (await pool.query('SELECT start_at, paid_pence, refunded_pence FROM bookings WHERE id=$1', [id])).rows[0];
     return {
       ...b, customerNotes: full.customer_notes, occasion: full.occasion, children: full.children, pricing: full.pricing_snapshot,
       consents: full.consents, pickupAddress: full.pickup_address, dropoffAddress: full.dropoff_address, routeMiles: full.route_miles, deliveryMiles: full.delivery_miles, points: { address: full.address_lat == null ? null : { lat: full.address_lat, lng: full.address_lng }, pickup: full.pickup_lat == null ? null : { lat: full.pickup_lat, lng: full.pickup_lng }, dropoff: full.dropoff_lat == null ? null : { lat: full.dropoff_lat, lng: full.dropoff_lng } }, addonIds: full.addon_ids, holdExpiresAt: full.hold_expires_at, cancelReason: full.cancel_reason,
       events: events.rows, emails: emails.rows, payments: payments.rows, refunds: refunds.rows, driverAssignments: assignments.rows, cancellationPolicy: policyRefund(row, s),
-      charges, addons, invoices, finance, createdByName: createdBy, defaultDeliveryRatePence: s['delivery.ratePerMilePence'], order, extensions,
+      charges, addons, invoices, finance, createdByName: createdBy, defaultDeliveryRatePence: s['delivery.ratePerMilePence'], order, extensions, selfDrive,
     };
   });
 

@@ -11,6 +11,7 @@ import { chargesForCustomer } from '../finance/charges.js';
 import { createOrder } from './orders.js';
 import { extensionsFor } from './extensions.js';
 import { itemSchema, orderSchema, withGeo } from './booking.schemas.js';
+import { selfDriveSchema } from '../self-drive/self-drive.js';
 
 
 /**
@@ -37,7 +38,9 @@ const customerBookingSql = `
          json_build_object('id', v.id, 'make', v.make, 'model', v.model, 'year', v.year, 'category', v.category, 'pricePerHourPence', v.price_per_hour_pence,
            'image', (SELECT url FROM vehicle_images i WHERE i.vehicle_id=v.id ORDER BY is_cover DESC, sort_order LIMIT 1)) AS vehicle,
          CASE WHEN e.id IS NULL THEN NULL ELSE json_build_object('id', e.id, 'title', e.title) END AS "eventType",
-         CASE WHEN d.id IS NULL THEN NULL ELSE json_build_object('name', d.full_name, 'phone', d.phone) END AS driver
+         CASE WHEN d.id IS NULL THEN NULL ELSE json_build_object('name', d.full_name, 'phone', d.phone) END AS driver,
+         (SELECT json_build_object('status', s.status, 'reviewNote', s.review_note, 'fullName', s.full_name, 'submittedAt', s.created_at)
+            FROM self_drive_applications s WHERE s.order_id=o.id) AS "selfDrive"
     FROM bookings b JOIN orders o ON o.id=b.order_id JOIN vehicles v ON v.id=b.vehicle_id
     LEFT JOIN event_types e ON e.id=b.event_type_id LEFT JOIN drivers d ON d.id=b.driver_id`;
 
@@ -96,6 +99,7 @@ export function myBookingRoutes(app: FastifyInstance) {
     const b = itemSchema.extend({
       offerCode: z.string().max(40).nullish(), customerNotes: z.string().max(1000).nullish(),
       consents: z.object({ guardian: z.boolean().optional(), terms: z.boolean().optional(), marketingPhotos: z.boolean().optional() }).nullish(),
+      selfDrive: selfDriveSchema.nullish(),
     }).parse(req.body);
     const key = z.string().max(100).optional().parse(req.headers['idempotency-key']);
     const [item] = await withGeo([b]); // measured on the server, outside the transaction
@@ -109,7 +113,7 @@ export function myBookingRoutes(app: FastifyInstance) {
     const b = orderSchema.parse(req.body);
     const key = z.string().max(100).optional().parse(req.headers['idempotency-key']);
     const items = await withGeo(b.items);
-    const out = await tx((c) => createOrder(c, { customerId: req.user.sub, items, offerCode: b.offerCode, customerNotes: b.customerNotes, consents: b.consents, idempotencyKey: key }));
+    const out = await tx((c) => createOrder(c, { customerId: req.user.sub, items, offerCode: b.offerCode, customerNotes: b.customerNotes, consents: b.consents, selfDrive: b.selfDrive, idempotencyKey: key }));
     return reply.status(out.replay ? 200 : 201).send(await orderDetail(out.order.id, req.user.sub));
   });
 

@@ -7,7 +7,13 @@ import { hashPassword } from '../src/core/security.js';
 export async function resetDb() {
   const { rows } = await pool.query(`SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> 'schema_migrations'`);
   await pool.query(`TRUNCATE ${rows.map((r) => '"' + r.tablename + '"').join(',')} RESTART IDENTITY CASCADE`);
+  // Most tests book cars self-drive without driver details; self-drive.test.ts turns the requirement back on.
+  await pool.query(`INSERT INTO settings(key,value) VALUES ('selfDrive.detailsRequired','false')`);
 }
+
+/** Turns on the self-drive driver details requirement (the production default). */
+export const requireSelfDriveDetails = () =>
+  pool.query(`INSERT INTO settings(key,value) VALUES ('selfDrive.detailsRequired','true') ON CONFLICT (key) DO UPDATE SET value='true'`);
 
 /** Turns on the optional approval step (off by default), for tests of the approve-then-pay flow. */
 export const requireApproval = () =>

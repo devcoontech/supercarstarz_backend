@@ -21,6 +21,10 @@ export const DEFAULT_SETTINGS = {
   'booking.allowDailyBookings': true, // customers can book whole days (1 day = 24 hours from the start time) as well as hours
   'booking.maxDays': 7, // longest day booking, in days
   'booking.maxVehiclesPerOrder': 10,
+  'selfDrive.detailsRequired': true, // customers booking a car without a driver must give the driver's details and licence photo
+  'selfDrive.minAge': 25, // youngest self-drive driver, in years, on the day of the booking
+  'selfDrive.minLicenceYears': 2, // years with a full driving licence
+  'selfDrive.maxPenaltyPoints': 6, // most penalty points accepted on the licence
   'delivery.ratePerMilePence': 435, // default delivery rate per mile from the showroom; staff confirm the final charge per booking
   'delivery.showroomFeePence': 0, // optional fee for collecting from the showroom; 0 means collection is free
   'pricing.serviceFeeBp': 0, // no service fee is charged (kept at 0; the setting is no longer shown in the dashboard)

@@ -57,6 +57,9 @@ export function settingsRoutes(app: FastifyInstance) {
         if (k === 'booking.pendingHoldHours' && (!Number.isInteger(v) || (v as number) > 720)) throw badRequest('How long an unapproved request holds a car must be a whole number of hours, up to 720 (0 = until staff act)');
         if (k === 'booking.maxOpenUnpaidOrders' && (!Number.isInteger(v) || (v as number) > 50)) throw badRequest('Open unpaid requests per customer must be a whole number up to 50 (0 = no limit)');
         if (k === 'pricing.serviceFeeBp' && v !== 0) throw badRequest('No service fee is charged on bookings');
+        if (k === 'selfDrive.minAge' && (!Number.isInteger(v) || (v as number) < 17 || (v as number) > 99)) throw badRequest('The minimum self-drive age must be between 17 and 99');
+        if (k === 'selfDrive.minLicenceYears' && (!Number.isInteger(v) || (v as number) > 30)) throw badRequest('Years with a full licence must be a whole number up to 30');
+        if (k === 'selfDrive.maxPenaltyPoints' && (!Number.isInteger(v) || (v as number) > 20)) throw badRequest('Penalty points must be a whole number up to 20');
         if (k === 'booking.maxDays' && (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 60)) throw badRequest('The longest day booking must be between 1 and 60 days');
         if (k === 'booking.maxAdvanceDays' && (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 1095)) throw badRequest('Advance booking must be between 1 and 1095 days');
         if ((k === 'delivery.ratePerMilePence' || k === 'delivery.showroomFeePence') && !Number.isInteger(v)) throw badRequest(`${k} must be a whole number of pence`);

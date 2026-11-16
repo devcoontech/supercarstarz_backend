@@ -13,6 +13,7 @@ import { assertSlotFree, lockVehicle, rangeParam } from './slots.js';
 import { logEvent, type Actor } from './history.js';
 import { activeAutoOffers, promoCodeRule } from '../offers/offer-rules.js';
 import { pool } from '../../core/db.js';
+import { checkSelfDrive, saveSelfDrive, type SelfDriveInput } from '../self-drive/self-drive.js';
 
 type C = pg.PoolClient;
 
@@ -69,7 +70,7 @@ export async function priceNewOrder(c: Pick<C, 'query'>, prepared: Prepared[], o
 
 /* ---------- Creating an order ---------- */
 
-export type OrderItemInput = Omit<BookingInput, 'customerId' | 'offerCode' | 'idempotencyKey'>;
+export type OrderItemInput = Omit<BookingInput, 'customerId' | 'offerCode' | 'idempotencyKey' | 'selfDrive'>;
 export type OrderInput = {
   customerId: string;
   items: OrderItemInput[];
@@ -77,6 +78,8 @@ export type OrderInput = {
   customerNotes?: string | null;
   consents?: BookingInput['consents'];
   idempotencyKey?: string | null;
+  /** Required from customers when any car is booked without a driver. */
+  selfDrive?: SelfDriveInput | null;
 };
 
 const insertBookingSql = `
@@ -172,6 +175,7 @@ export async function createOrder(c: C, o: OrderInput, by: { staffId?: string; s
   const prepared: Prepared[] = [];
   for (const i of o.items) prepared.push(await prepareItem(c, { ...i, customerId: o.customerId }, !!by.staffId));
   const price = await priceNewOrder(c, prepared, { code: o.offerCode, customerId: o.customerId, lockCode: true });
+  const selfDrive = await checkSelfDrive(c, o.selfDrive, prepared, o.customerId, settings, !!by.staffId);
 
   const status = by.status ?? (settings['booking.requireApproval'] ? 'pending' : 'awaiting_payment');
   // An unpaid customer request holds cars for everyone else, so it expires (expireHolds) unless staff act first.
@@ -197,6 +201,7 @@ export async function createOrder(c: C, o: OrderInput, by: { staffId?: string; s
     await insertItemExtras(c, row, p, o.items[n].hours);
     rows.push(row);
   }
+  if (selfDrive) await saveSelfDrive(c, order.id, o.customerId, selfDrive);
   const rules = [...(await activeAutoOffers(c, o.customerId)), ...(o.offerCode?.trim() ? [await promoCodeRule(c, o.offerCode, o.customerId, false).catch(() => null)].filter(Boolean) as OfferRule[] : [])];
   await saveOrderOffers(c, order.id, rows[0].id, o.customerId, price, rules);
 

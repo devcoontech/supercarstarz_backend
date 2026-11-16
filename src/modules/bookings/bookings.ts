@@ -4,6 +4,7 @@ import { loadRules, priceItem, type AddonRow, type ItemPrice } from '../pricing/
 import { getSettings, type Settings } from '../../core/settings.js';
 import type { Geo } from './geo.js';
 import { createOrder } from './orders.js';
+import type { SelfDriveInput } from '../self-drive/self-drive.js';
 import { effectiveBuffer, type Slot, buildSlot, assertDuration } from './slots.js';
 
 type C = pg.PoolClient;
@@ -34,6 +35,8 @@ export type BookingInput = {
   dropoffAddress?: string | null;
   /** Set only by the server (see geo.ts) before the transaction; never read from a request body. */
   geo?: Geo;
+  /** The driver's details and licence, for a self-drive booking (see self-drive.ts). */
+  selfDrive?: SelfDriveInput | null;
 };
 
 export type DriverOption = 'with_driver' | 'self_drive';
@@ -115,7 +118,7 @@ export async function createBooking(
     const ex = await c.query('SELECT * FROM bookings WHERE customer_id=$1 AND idempotency_key=$2', [i.customerId, i.idempotencyKey]);
     if (ex.rows[0]) return { booking: ex.rows[0], replay: true };
   }
-  const { customerId, offerCode, idempotencyKey, customerNotes, consents, ...item } = i;
-  const r = await createOrder(c, { customerId, items: [item], offerCode, idempotencyKey, customerNotes, consents }, by);
+  const { customerId, offerCode, idempotencyKey, customerNotes, consents, selfDrive, ...item } = i;
+  const r = await createOrder(c, { customerId, items: [item], offerCode, idempotencyKey, customerNotes, consents, selfDrive }, by);
   return { booking: r.bookings[0], replay: r.replay };
 }

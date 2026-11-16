@@ -43,4 +43,8 @@ export async function deleteCustomerAccount(c: C, customerId: string, password: 
   // Nothing more is sent to this person.
   await c.query(`UPDATE email_outbox SET status='skipped', last_error='account deleted' WHERE customer_id=$1 AND status IN ('pending','sending')`, [customerId]);
   await c.query(`UPDATE push_outbox SET status='skipped', last_error='account deleted' WHERE customer_id=$1 AND status IN ('pending','sending')`, [customerId]);
+  // Self-drive driver details and licence photos are identity documents, not financial records: they go entirely.
+  await c.query('DELETE FROM self_drive_applications WHERE customer_id=$1', [customerId]);
+  const licenceFiles = (await c.query('DELETE FROM customer_licence_uploads WHERE customer_id=$1 RETURNING storage_key', [customerId])).rows.map((r) => r.storage_key as string);
+  return { licenceFiles };
 }

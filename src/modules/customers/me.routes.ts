@@ -7,6 +7,7 @@ import { myBookingRoutes } from '../bookings/my-bookings.routes.js';
 import { myPaymentRoutes } from '../payments/my-payments.routes.js';
 import { myExtensionRoutes } from '../bookings/my-extensions.routes.js';
 import { myDocumentRoutes } from '../finance/my-documents.routes.js';
+import { mySelfDriveRoutes, removeCustomerLicenceFiles } from '../self-drive/self-drive.routes.js';
 
 const pushToken = z.string().max(200).regex(/^Expo(nent)?PushToken\[[^\]]+\]$/, 'Not a valid push token');
 
@@ -18,6 +19,7 @@ export async function customerRoutes(app: FastifyInstance) {
   myPaymentRoutes(app);
   myExtensionRoutes(app);
   myDocumentRoutes(app);
+  mySelfDriveRoutes(app);
 
   app.get('/', async (req) => {
     const c = (await pool.query('SELECT id, email, name, phone, postcode, city FROM customers WHERE id=$1', [req.user.sub])).rows[0];
@@ -56,7 +58,8 @@ export async function customerRoutes(app: FastifyInstance) {
    */
   app.post('/delete', { config: { rateLimit: { max: process.env.NODE_ENV === 'test' ? 10000 : 5, timeWindow: '1 minute' } } }, async (req) => {
     const b = z.object({ password: z.string().min(1).max(200) }).parse(req.body);
-    await tx((c) => deleteCustomerAccount(c, req.user.sub, b.password));
+    const { licenceFiles } = await tx((c) => deleteCustomerAccount(c, req.user.sub, b.password));
+    await removeCustomerLicenceFiles(licenceFiles); // after the commit, so a failed deletion keeps them
     return { ok: true };
   });
 

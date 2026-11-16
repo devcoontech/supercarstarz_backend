@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { resolveGeo } from './geo.js';
 import { badRequest } from '../../core/errors.js';
 import { getSettings } from '../../core/settings.js';
+import { selfDriveSchema } from '../self-drive/self-drive.js';
 
 const POINT = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).nullish();
 
@@ -22,6 +23,7 @@ export const orderSchema = z.object({
   offerCode: z.string().max(40).nullish(),
   customerNotes: z.string().max(1000).nullish(),
   consents: z.object({ guardian: z.boolean().optional(), terms: z.boolean().optional(), marketingPhotos: z.boolean().optional() }).nullish(),
+  selfDrive: selfDriveSchema.nullish(),
 });
 
 /**

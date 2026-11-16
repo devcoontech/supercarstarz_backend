@@ -166,7 +166,10 @@ export async function publicRoutes(app: FastifyInstance) {
   app.get('/config', async () => {
     const s = await getSettings();
     return {
-      company: { name: s['company.name'], supportEmail: s['company.supportEmail'] || null, supportPhone: s['company.supportPhone'] || null, privacyUrl: s['company.privacyUrl'] || null, websiteUrl: s['company.websiteUrl'] || null },
+      company: { name: s['company.name'], supportEmail: s['company.supportEmail'] || null, supportPhone: s['company.supportPhone'] || null, privacyUrl: s['company.privacyUrl'] || null, websiteUrl: s['company.websiteUrl'] || null,
+        // Shown on the app's "About Supercarstars" page, from Settings > Business details.
+        description: s['company.description'] || null, address: s['company.address'] || null, city: s['company.city'] || null },
+      selfDrive: { detailsRequired: s['selfDrive.detailsRequired'], minAge: s['selfDrive.minAge'], minLicenceYears: s['selfDrive.minLicenceYears'], maxPenaltyPoints: s['selfDrive.maxPenaltyPoints'] },
       booking: {
         timezone: s['booking.timezone'], openHour: s['booking.openHour'], closeHour: s['booking.closeHour'], minLeadHours: s['booking.minLeadHours'],
         requireApproval: s['booking.requireApproval'], holdMinutes: s['booking.holdMinutes'],
