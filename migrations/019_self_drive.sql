@@ -1,8 +1,9 @@
 -- Self-drive bookings: the driver's details and driving licence, given by the customer when they book a car without a driver.
+-- IF NOT EXISTS: a database that already ran this as 022_self_drive.sql (the mixed-up build) keeps its tables and data.
 
 -- Licence photos the customer uploads from the app. Private files (never served publicly), like staff-held driver licences.
 -- A photo can be reused on later bookings, so it belongs to the customer rather than to one booking.
-CREATE TABLE customer_licence_uploads (
+CREATE TABLE IF NOT EXISTS customer_licence_uploads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id uuid NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
   side text NOT NULL CHECK (side IN ('front','back')),
@@ -11,10 +12,10 @@ CREATE TABLE customer_licence_uploads (
   size_bytes int NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX customer_licence_uploads_customer ON customer_licence_uploads(customer_id, side, created_at DESC);
+CREATE INDEX IF NOT EXISTS customer_licence_uploads_customer ON customer_licence_uploads(customer_id, side, created_at DESC);
 
 -- One application per order: the person who will drive every self-drive car in it. Staff review it before handover.
-CREATE TABLE self_drive_applications (
+CREATE TABLE IF NOT EXISTS self_drive_applications (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id uuid NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
   customer_id uuid NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -43,5 +44,5 @@ CREATE TABLE self_drive_applications (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX self_drive_applications_customer ON self_drive_applications(customer_id, created_at DESC);
-CREATE INDEX self_drive_applications_status ON self_drive_applications(status) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS self_drive_applications_customer ON self_drive_applications(customer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS self_drive_applications_status ON self_drive_applications(status) WHERE status = 'pending';
